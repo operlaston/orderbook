@@ -56,7 +56,7 @@ private:
 
 public:
   Orderbook() { currId = 0; }
-  bool CreateOrder(Side side, Price price, Quantity quantity) {
+  bool AddOrder(Side side, Price price, Quantity quantity) {
     // make sure side is either sell or buy
     if (side != Side::SELL && side != Side::BUY) {
       return false;
@@ -140,6 +140,17 @@ public:
     }
 
     currId++;
+    return true;
+  }
+
+  bool CancelOrder(OrderId orderId) {
+    // TODO: cancel order
+    return true;
+  }
+
+  bool ModifyOrder(OrderId orderId, Quantity newQuantity) {
+    // TODO: modify order
+    // only decreasing quantity should be allowed
     return true;
   }
 };
