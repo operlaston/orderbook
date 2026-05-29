@@ -1,5 +1,5 @@
 CC=g++
-CCFLAGS=-std=c++20 -Wall -Wextra
+CCFLAGS=-std=c++20 -Wall -Wextra -g
 INCLUDES=-I./include
 
 orderbook: src/main.cpp src/Orderbook.cpp $(wildcard include/*.h)

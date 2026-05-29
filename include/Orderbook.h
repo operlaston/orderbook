@@ -20,9 +20,9 @@ private:
 
 public:
   Orderbook();
-  bool addOrder(Side side, Price price, Quantity quantity);
-  bool cancelOrder(OrderId orderId);
-  bool modifyOrder(OrderId orderId, Quantity newQuantity);
+  void addOrder(Side side, Price price, Quantity quantity);
+  void cancelOrder(OrderId orderId);
+  void modifyOrder(OrderId orderId, Quantity newQuantity);
   void printOrderbook();
   void printTrades();
 };

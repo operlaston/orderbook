@@ -4,17 +4,17 @@
 
 Orderbook::Orderbook() { currId = 0; }
 
-bool Orderbook::addOrder(Side side, Price price, Quantity quantity) {
+void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
   // make sure side is either sell or buy
   if (side != Side::SELL && side != Side::BUY) {
-    return false;
+    return;
   }
 
   if (price <= 0 || quantity <= 0) {
     std::cout << "Error while adding order. Price and quantity must be "
                  "positive."
               << std::endl;
-    return false;
+    return;
   }
 
   // get current time in nanoseconds since the epoch
@@ -30,7 +30,7 @@ bool Orderbook::addOrder(Side side, Price price, Quantity quantity) {
       Order &lowestAsk = lowestAskPriceLevel.front();
       Price lowestAskPrice = lowestAsk.getPrice();
       // check the lowest ask
-      while (!m_asks.empty() && price >= lowestAskPrice) {
+      while (price >= lowestAskPrice) {
 
         Quantity lowestAskQuantity = lowestAsk.getQuantity();
 
@@ -46,15 +46,24 @@ bool Orderbook::addOrder(Side side, Price price, Quantity quantity) {
           // erase the ask from both the activeOrders map and the asks queue
           lowestAskPriceLevel.erase(lowestAskPriceLevel.begin());
           m_activeOrders.erase(lowestAsk.getId());
+
+          // if the list for the price level is empty, erase the priceLevel
+          // entry as well
+          if (lowestAskPriceLevel.empty()) {
+            m_asks.erase(m_asks.begin());
+          }
+
           quantity -= lowestAskQuantity;
           m_trades.emplace_back(currId, lowestAsk.getId(), lowestAskPrice,
                                 lowestAskQuantity, currNs);
-          if (m_asks.empty()) {
+
+          // break if there are no more asks
+          if (m_asks.empty())
             break;
-          }
+
+          lowestAsk = m_asks.begin()->second.front();
+          lowestAskPrice = lowestAsk.getPrice();
         }
-        lowestAsk = m_asks.begin()->second.front();
-        lowestAskPrice = lowestAsk.getPrice();
       }
     }
 
@@ -74,7 +83,7 @@ bool Orderbook::addOrder(Side side, Price price, Quantity quantity) {
       Order &highestBid = highestBidPriceLevel.front();
       Price highestBidPrice = highestBid.getPrice();
       // check the lowest bid
-      while (!m_bids.empty() && price <= highestBidPrice) {
+      while (price <= highestBidPrice) {
         Quantity highestBidQuantity = highestBid.getQuantity();
 
         // fill the order and break out of loop if bid quantity does
@@ -89,12 +98,23 @@ bool Orderbook::addOrder(Side side, Price price, Quantity quantity) {
           // erase the order from both the activeOrders map and the bids queue
           highestBidPriceLevel.erase(highestBidPriceLevel.begin());
           m_activeOrders.erase(highestBid.getId());
+
+          // if the list for the price level is empty, erase the priceLevel
+          // entry as well
+          if (highestBidPriceLevel.empty()) {
+            m_bids.erase(m_bids.begin());
+          }
+
           quantity -= highestBidQuantity;
           m_trades.emplace_back(currId, highestBid.getId(), highestBidPrice,
                                 highestBidQuantity, currNs);
+
+          if (m_bids.empty())
+            break;
+
+          highestBid = m_bids.begin()->second.front();
+          highestBidPrice = highestBid.getPrice();
         }
-        highestBid = m_bids.begin()->second.front();
-        highestBidPrice = highestBid.getPrice();
       }
     }
 
@@ -108,15 +128,14 @@ bool Orderbook::addOrder(Side side, Price price, Quantity quantity) {
   }
 
   currId++;
-  return true;
 }
 
-bool Orderbook::cancelOrder(OrderId orderId) {
+void Orderbook::cancelOrder(OrderId orderId) {
   if (!m_activeOrders.contains(orderId)) {
     // order does not exist
     std::cout << "Error while cancelling order.\norderId: " << orderId
               << " doesn't exist" << std::endl;
-    return false;
+    return;
   }
 
   // remove the order from its queue and the activeOrders map
@@ -128,15 +147,14 @@ bool Orderbook::cancelOrder(OrderId orderId) {
     m_asks[order.getPrice()].erase(it);
   }
   m_activeOrders.erase(orderId);
-  return true;
 }
 
-bool Orderbook::modifyOrder(OrderId orderId, Quantity newQuantity) {
+void Orderbook::modifyOrder(OrderId orderId, Quantity newQuantity) {
   if (!m_activeOrders.contains(orderId)) {
     // invalid orderId
     std::cout << "Error while modifying order.\norderId: " << orderId
               << " doesn't exist" << std::endl;
-    return false;
+    return;
   }
 
   // modify the order in place
@@ -149,11 +167,10 @@ bool Orderbook::modifyOrder(OrderId orderId, Quantity newQuantity) {
                  "than the old quantity "
                  "and must be a positive number"
               << std::endl;
-    return false;
+    return;
   }
 
   it->setQuantity(newQuantity);
-  return true;
 }
 
 void Orderbook::printOrderbook() {
