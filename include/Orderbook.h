@@ -17,11 +17,13 @@ private:
   std::unordered_map<OrderId, std::list<Order>::iterator> m_activeOrders;
   std::vector<Trade> m_trades;
   OrderId currId;
+  Quantity matchOrder(Side side, Price price, Quantity quantity,
+                      Timestamp currNs);
 
 public:
   Orderbook();
   void addOrder(Side side, Price price, Quantity quantity);
-  void cancelOrder(OrderId orderId);
+  void removeOrder(OrderId orderId);
   void modifyOrder(OrderId orderId, Quantity newQuantity);
   void printOrderbook();
   void printTrades();

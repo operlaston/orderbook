@@ -4,6 +4,81 @@
 
 Orderbook::Orderbook() { currId = 0; }
 
+// returns the remaining quantity of the order
+Quantity Orderbook::matchOrder(Side side, Price price, Quantity quantity,
+                               Timestamp currNs) {
+  if (side == Side::BUY) {
+    if (!m_asks.empty()) {
+      Order &lowestAsk = m_asks.begin()->second.front();
+      Price lowestAskPrice = lowestAsk.getPrice();
+      // check the lowest ask
+      while (price >= lowestAskPrice) {
+
+        Quantity lowestAskQuantity = lowestAsk.getQuantity();
+
+        // fill the order and break out of loop if bid quantity does
+        // not exceed lowest ask quantity
+        if (lowestAskQuantity >= quantity) {
+          lowestAsk.setQuantity(lowestAskQuantity - quantity);
+          m_trades.emplace_back(currId, lowestAsk.getId(), lowestAskPrice,
+                                quantity, currNs);
+          quantity = 0;
+          break;
+        } else {
+          // remove filled order
+          removeOrder(lowestAsk.getId());
+
+          // update quantity and log trade
+          quantity -= lowestAskQuantity;
+          m_trades.emplace_back(currId, lowestAsk.getId(), lowestAskPrice,
+                                lowestAskQuantity, currNs);
+
+          // break if there are no more asks
+          if (m_asks.empty())
+            break;
+
+          lowestAsk = m_asks.begin()->second.front();
+          lowestAskPrice = lowestAsk.getPrice();
+        }
+      }
+    }
+  } else {
+    if (!m_bids.empty()) {
+      Order &highestBid = m_bids.begin()->second.front();
+      Price highestBidPrice = highestBid.getPrice();
+      // check the lowest bid
+      while (price <= highestBidPrice) {
+        Quantity highestBidQuantity = highestBid.getQuantity();
+
+        // fill the order and break out of loop if bid quantity does
+        // not exceed lowest ask quantity
+        if (highestBidQuantity >= quantity) {
+          highestBid.setQuantity(highestBidQuantity - quantity);
+          m_trades.emplace_back(currId, highestBid.getId(), highestBidPrice,
+                                quantity, currNs);
+          quantity = 0;
+          break;
+        } else {
+          // remove filled order
+          removeOrder(highestBid.getId());
+
+          // update quantity and log trade
+          quantity -= highestBidQuantity;
+          m_trades.emplace_back(currId, highestBid.getId(), highestBidPrice,
+                                highestBidQuantity, currNs);
+
+          if (m_bids.empty())
+            break;
+
+          highestBid = m_bids.begin()->second.front();
+          highestBidPrice = highestBid.getPrice();
+        }
+      }
+    }
+  }
+  return quantity;
+}
+
 void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
   // make sure side is either sell or buy
   if (side != Side::SELL && side != Side::BUY) {
@@ -23,106 +98,28 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
   Timestamp currNs =
       std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
 
+  Quantity remainingQuantity = matchOrder(side, price, quantity, currNs);
+
   // first check if the order can immediately be filled
   if (side == Side::BUY) {
-    if (!m_asks.empty()) {
-      PriceLevel &lowestAskPriceLevel = m_asks.begin()->second;
-      Order &lowestAsk = lowestAskPriceLevel.front();
-      Price lowestAskPrice = lowestAsk.getPrice();
-      // check the lowest ask
-      while (price >= lowestAskPrice) {
 
-        Quantity lowestAskQuantity = lowestAsk.getQuantity();
-
-        // fill the order and break out of loop if bid quantity does
-        // not exceed lowest ask quantity
-        if (lowestAskQuantity >= quantity) {
-          lowestAsk.setQuantity(lowestAskQuantity - quantity);
-          m_trades.emplace_back(currId, lowestAsk.getId(), lowestAskPrice,
-                                quantity, currNs);
-          quantity = 0;
-          break;
-        } else {
-          // erase the ask from both the activeOrders map and the asks queue
-          lowestAskPriceLevel.erase(lowestAskPriceLevel.begin());
-          m_activeOrders.erase(lowestAsk.getId());
-
-          // if the list for the price level is empty, erase the priceLevel
-          // entry as well
-          if (lowestAskPriceLevel.empty()) {
-            m_asks.erase(m_asks.begin());
-          }
-
-          quantity -= lowestAskQuantity;
-          m_trades.emplace_back(currId, lowestAsk.getId(), lowestAskPrice,
-                                lowestAskQuantity, currNs);
-
-          // break if there are no more asks
-          if (m_asks.empty())
-            break;
-
-          lowestAsk = m_asks.begin()->second.front();
-          lowestAskPrice = lowestAsk.getPrice();
-        }
-      }
-    }
-
-    if (quantity > 0) {
+    if (remainingQuantity > 0) {
       // if the order isn't filled completely, add it to the list
       PriceLevel &priceLevel = m_bids[price];
       // add to end of PriceLevel list
       auto it = priceLevel.emplace(priceLevel.end(), currId, side, price,
-                                   quantity, currNs);
+                                   remainingQuantity, currNs);
       // add to activeOrders map
       m_activeOrders[currId] = it;
     }
 
   } else if (side == Side::SELL) {
-    if (!m_bids.empty()) {
-      PriceLevel &highestBidPriceLevel = m_bids.begin()->second;
-      Order &highestBid = highestBidPriceLevel.front();
-      Price highestBidPrice = highestBid.getPrice();
-      // check the lowest bid
-      while (price <= highestBidPrice) {
-        Quantity highestBidQuantity = highestBid.getQuantity();
 
-        // fill the order and break out of loop if bid quantity does
-        // not exceed lowest ask quantity
-        if (highestBidQuantity >= quantity) {
-          highestBid.setQuantity(highestBidQuantity - quantity);
-          m_trades.emplace_back(currId, highestBid.getId(), highestBidPrice,
-                                quantity, currNs);
-          quantity = 0;
-          break;
-        } else {
-          // erase the order from both the activeOrders map and the bids queue
-          highestBidPriceLevel.erase(highestBidPriceLevel.begin());
-          m_activeOrders.erase(highestBid.getId());
-
-          // if the list for the price level is empty, erase the priceLevel
-          // entry as well
-          if (highestBidPriceLevel.empty()) {
-            m_bids.erase(m_bids.begin());
-          }
-
-          quantity -= highestBidQuantity;
-          m_trades.emplace_back(currId, highestBid.getId(), highestBidPrice,
-                                highestBidQuantity, currNs);
-
-          if (m_bids.empty())
-            break;
-
-          highestBid = m_bids.begin()->second.front();
-          highestBidPrice = highestBid.getPrice();
-        }
-      }
-    }
-
-    if (quantity > 0) {
+    if (remainingQuantity > 0) {
       // if the order isn't filled completely, add it to the list
       PriceLevel &priceLevel = m_asks[price];
       auto it = priceLevel.emplace(priceLevel.end(), currId, side, price,
-                                   quantity, currNs);
+                                   remainingQuantity, currNs);
       m_activeOrders[currId] = it;
     }
   }
@@ -130,7 +127,7 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
   currId++;
 }
 
-void Orderbook::cancelOrder(OrderId orderId) {
+void Orderbook::removeOrder(OrderId orderId) {
   if (!m_activeOrders.contains(orderId)) {
     // order does not exist
     std::cout << "Error while cancelling order.\norderId: " << orderId
@@ -143,8 +140,16 @@ void Orderbook::cancelOrder(OrderId orderId) {
   Order order = *it;
   if (order.getSide() == Side::BUY) {
     m_bids[order.getPrice()].erase(it);
+    // if the list for the price level is empty, then erase the entry list
+    if (m_bids[order.getPrice()].empty()) {
+      m_bids.erase(order.getPrice());
+    }
   } else if (order.getSide() == Side::SELL) {
     m_asks[order.getPrice()].erase(it);
+    // if the list for the price level is empty, then erase the entry list
+    if (m_asks[order.getPrice()].empty()) {
+      m_asks.erase(order.getPrice());
+    }
   }
   m_activeOrders.erase(orderId);
 }
