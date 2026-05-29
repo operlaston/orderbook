@@ -17,10 +17,8 @@ private:
   std::unordered_map<OrderId, std::list<Order>::iterator> m_activeOrders;
   std::vector<Trade> m_trades;
   OrderId currId;
-  Quantity matchOrder(Side side, Price price, Quantity quantity,
-                      Timestamp timestamp);
-  void fillOrKill(Side side, Price price, Quantity quantity,
-                  Timestamp timestamp);
+  Quantity matchOrder(const Order &incomingOrder);
+  bool canFill(const Order &incomingOrder);
 
 public:
   Orderbook();

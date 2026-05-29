@@ -5,8 +5,18 @@
 Orderbook::Orderbook() { currId = 0; }
 
 // returns the remaining quantity of the order
-Quantity Orderbook::matchOrder(Side side, Price price, Quantity quantity,
-                               Timestamp timestamp) {
+Quantity Orderbook::matchOrder(const Order &incomingOrder) {
+  Side side = incomingOrder.getSide();
+  Price price = incomingOrder.getPrice();
+  Quantity quantity = incomingOrder.getQuantity();
+  Timestamp timestamp = incomingOrder.getTimestamp();
+
+  if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL &&
+      !canFill(incomingOrder)) {
+    std::cout << "\nCAN'T FILL FOK Order. Cancelling order." << std::endl;
+    return quantity;
+  }
+
   if (side == Side::BUY) {
     if (!m_asks.empty()) {
       Order &lowestAsk = m_asks.begin()->second.front();
@@ -18,22 +28,17 @@ Quantity Orderbook::matchOrder(Side side, Price price, Quantity quantity,
 
         // fill the order and break out of loop if bid quantity does
         // not exceed lowest ask quantity
-        if (lowestAskQuantity >= quantity) {
+        if (lowestAskQuantity > quantity) {
           lowestAsk.setQuantity(lowestAskQuantity - quantity);
           m_trades.emplace_back(currId, lowestAsk.getId(), lowestAskPrice,
                                 quantity, timestamp);
           quantity = 0;
           break;
         } else {
-          // remove filled order
           removeOrder(lowestAsk.getId());
-
-          // update quantity and log trade
           quantity -= lowestAskQuantity;
           m_trades.emplace_back(currId, lowestAsk.getId(), lowestAskPrice,
                                 lowestAskQuantity, timestamp);
-
-          // break if there are no more asks
           if (m_asks.empty())
             break;
 
@@ -52,7 +57,7 @@ Quantity Orderbook::matchOrder(Side side, Price price, Quantity quantity,
 
         // fill the order and break out of loop if bid quantity does
         // not exceed lowest ask quantity
-        if (highestBidQuantity >= quantity) {
+        if (highestBidQuantity > quantity) {
           highestBid.setQuantity(highestBidQuantity - quantity);
           m_trades.emplace_back(currId, highestBid.getId(), highestBidPrice,
                                 quantity, timestamp);
@@ -79,9 +84,79 @@ Quantity Orderbook::matchOrder(Side side, Price price, Quantity quantity,
   return quantity;
 }
 
+bool Orderbook::canFill(const Order &incomingOrder) {
+  Side side = incomingOrder.getSide();
+  Price price = incomingOrder.getPrice();
+  Quantity quantity = incomingOrder.getQuantity();
+
+  if (side == Side::BUY && !m_asks.empty()) {
+    auto currPriceLevel = m_asks.begin();
+    PriceLevel *currPriceList = &currPriceLevel->second;
+    auto currPriceListIter = currPriceList->begin();
+    Order lowestAsk = *currPriceListIter;
+    Price lowestAskPrice = lowestAsk.getPrice();
+    // check the lowest ask
+    while (price >= lowestAskPrice) {
+
+      Quantity lowestAskQuantity = lowestAsk.getQuantity();
+
+      // fill the order and break out of loop if bid quantity does
+      // not exceed lowest ask quantity
+      if (lowestAskQuantity >= quantity) {
+        quantity = 0;
+        break;
+      } else {
+        quantity -= lowestAskQuantity;
+        currPriceListIter++;
+        if (currPriceListIter == currPriceList->end()) {
+          currPriceLevel++;
+          if (currPriceLevel == m_asks.end()) {
+            break;
+          }
+          currPriceList = &currPriceLevel->second;
+          currPriceListIter = currPriceList->begin();
+        }
+        lowestAsk = *currPriceListIter;
+        lowestAskPrice = lowestAsk.getPrice();
+      }
+    }
+  } else if (!m_bids.empty()) {
+    auto currPriceLevel = m_bids.begin();
+    PriceLevel *currPriceList = &currPriceLevel->second;
+    auto currPriceListIter = currPriceList->begin();
+    Order &highestBid = *currPriceListIter;
+    Price highestBidPrice = highestBid.getPrice();
+    // check the lowest bid
+    while (price <= highestBidPrice) {
+      Quantity highestBidQuantity = highestBid.getQuantity();
+
+      // fill the order and break out of loop if bid quantity does
+      // not exceed lowest ask quantity
+      if (highestBidQuantity >= quantity) {
+        quantity = 0;
+        break;
+      } else {
+        quantity -= highestBidQuantity;
+        currPriceListIter++;
+        if (currPriceListIter == currPriceList->end()) {
+          currPriceLevel++;
+          if (currPriceLevel == m_asks.end()) {
+            break;
+          }
+          currPriceList = &currPriceLevel->second;
+          currPriceListIter = currPriceList->begin();
+        }
+        highestBid = m_bids.begin()->second.front();
+        highestBidPrice = highestBid.getPrice();
+      }
+    }
+  }
+
+  return quantity == 0;
+}
+
 void Orderbook::addOrder(Side side, Price price, Quantity quantity,
                          OrderType orderType, TimeInForce timeInForce) {
-  // make sure side is either sell or buy
   if (side != Side::SELL && side != Side::BUY) {
     return;
   }
@@ -93,29 +168,32 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity,
     return;
   }
 
-  // get current time in nanoseconds since the epoch
   Timestamp timestamp = std::chrono::system_clock::now();
 
-  Quantity remainingQuantity = matchOrder(side, price, quantity, timestamp);
+  Order order(currId, side, price, quantity, timestamp, orderType, timeInForce);
 
-  // first check if the order can immediately be filled
+  Quantity remainingQuantity = matchOrder(order);
+
+  // we do not add the order to the orderbook if immediate or cancel
+  // or fill or kill
+  if (timeInForce == TimeInForce::IMMEDIATE_OR_CANCEL ||
+      timeInForce == TimeInForce::FILL_OR_KILL) {
+    return;
+  }
+
   if (side == Side::BUY) {
 
     if (remainingQuantity > 0) {
-      // if the order isn't filled completely, add it to the list
       PriceLevel &priceLevel = m_bids[price];
-      // add to end of PriceLevel list
       auto it = priceLevel.emplace(priceLevel.end(), currId, side, price,
                                    remainingQuantity, timestamp, orderType,
                                    timeInForce);
-      // add to activeOrders map
       m_activeOrders[currId] = it;
     }
 
   } else if (side == Side::SELL) {
 
     if (remainingQuantity > 0) {
-      // if the order isn't filled completely, add it to the list
       PriceLevel &priceLevel = m_asks[price];
       auto it = priceLevel.emplace(priceLevel.end(), currId, side, price,
                                    remainingQuantity, timestamp, orderType,

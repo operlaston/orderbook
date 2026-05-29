@@ -1,4 +1,6 @@
+#include <OrderType.h>
 #include <Orderbook.h>
+#include <TimeInForce.h>
 
 int main() {
   Orderbook orderbook;
@@ -17,8 +19,9 @@ int main() {
   orderbook.addOrder(Side::BUY, 99.28, 50);
   // orderbook.printOrderbook();
   // orderbook.printTrades();
-  orderbook.addOrder(Side::BUY, 102.37, 80);
-  orderbook.modifyOrder(4, 5);
+  orderbook.addOrder(Side::BUY, 102.37, 80, OrderType::LIMIT,
+                     TimeInForce::FILL_OR_KILL);
+  // orderbook.modifyOrder(4, 5);
   orderbook.printOrderbook();
   orderbook.printTrades();
   return 0;

@@ -18,16 +18,18 @@ private:
 
 public:
   Order(OrderId id, Side side, Price price, Quantity quantity,
-        Timestamp timestamp, OrderType orderType = OrderType::LIMIT,
-        TimeInForce timeInForce = TimeInForce::GOOD_TILL_CANCEL)
+        Timestamp timestamp, OrderType orderType, TimeInForce timeInForce)
       : m_id(id), m_side(side), m_price(price), m_quantity(quantity),
         m_timestamp(timestamp), m_orderType(orderType),
         m_timeInForce(timeInForce) {}
 
-  OrderId getId() { return m_id; }
-  Price getPrice() { return m_price; }
-  Side getSide() { return m_side; }
-  Quantity getQuantity() { return m_quantity; }
+  OrderId getId() const { return m_id; }
+  Price getPrice() const { return m_price; }
+  Side getSide() const { return m_side; }
+  Timestamp getTimestamp() const { return m_timestamp; }
+  OrderType getOrderType() const { return m_orderType; }
+  TimeInForce getTimeInForce() const { return m_timeInForce; }
+  Quantity getQuantity() const { return m_quantity; }
   void setQuantity(Quantity quantity) { m_quantity = quantity; }
 
   void display() const {
