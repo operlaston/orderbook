@@ -20,7 +20,7 @@ int main() {
   // orderbook.printOrderbook();
   // orderbook.printTrades();
   orderbook.addOrder(Side::BUY, 102.37, 80, OrderType::LIMIT,
-                     TimeInForce::FILL_OR_KILL);
+                     TimeInForce::IMMEDIATE_OR_CANCEL);
   // orderbook.modifyOrder(4, 5);
   orderbook.printOrderbook();
   orderbook.printTrades();

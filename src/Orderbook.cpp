@@ -258,14 +258,14 @@ void Orderbook::modifyOrder(OrderId orderId, Quantity newQuantity) {
 
 void Orderbook::printOrderbook() {
   std::cout << "\nOrderbook State" << std::endl;
-  std::cout << "Asks: " << std::endl;
+  std::cout << "\nAsks: " << std::endl;
   for (const auto &[priceLevel, orders] : m_asks) {
     for (const auto &order : orders) {
       order.display();
     }
   }
 
-  std::cout << "Bids: " << std::endl;
+  std::cout << "\nBids: " << std::endl;
   for (const auto &[priceLevel, orders] : m_bids) {
     for (const auto &order : orders) {
       order.display();
