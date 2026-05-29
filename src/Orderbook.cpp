@@ -1,56 +1,19 @@
+#include <Order.h>
+#include <Trade.h>
+#include <Using.h>
 #include <assert.h>
 #include <chrono>
-#include <cstdint>
 #include <functional>
+#include <list>
 #include <map>
-#include <vector>
 
-using OrderId = uint64_t;
-using Price = uint64_t;
-using Quantity = uint64_t;
-using Timestamp = uint64_t;
-
-enum class Side { BUY, SELL };
-
-class Order {
-private:
-  OrderId m_id;
-  Side m_side;
-  Price m_price;
-  Quantity m_quantity;
-  Timestamp m_timestamp;
-
-public:
-  Order(OrderId id, Side side, Price price, Quantity quantity,
-        Timestamp timestamp)
-      : m_id(id), m_side(side), m_price(price), m_quantity(quantity),
-        m_timestamp(timestamp) {}
-
-  OrderId getId() { return m_id; }
-  Price getPrice() { return m_price; }
-  Quantity getQuantity() { return m_quantity; }
-  void setQuantity(Quantity quantity) { m_quantity = quantity; }
-};
-
-class Trade {
-private:
-  OrderId m_bidId;
-  OrderId m_askId;
-  Price m_price;
-  Quantity m_quantity;
-  Timestamp m_timestamp;
-
-public:
-  Trade(OrderId bidId, OrderId askId, Price price, Quantity quantity,
-        Timestamp timestamp)
-      : m_bidId(bidId), m_askId(askId), m_price(price), m_quantity(quantity),
-        m_timestamp(timestamp) {}
-};
+using PriceLevel = std::list<Order>;
 
 class Orderbook {
 private:
-  std::map<OrderId, Order, std::greater<OrderId>> m_bids;
-  std::map<OrderId, Order> m_asks;
+  std::map<Price, std::list<Order>, std::greater<Price>> m_bids;
+  std::map<Price, std::list<Order>> m_asks;
+  std::unordered_map<OrderId, std::list<Order>::iterator> m_activeOrders;
   std::vector<Trade> m_trades;
   OrderId currId;
 
@@ -71,7 +34,7 @@ public:
     // first check if the order can immediately be filled
     if (side == Side::BUY) {
       if (!m_asks.empty()) {
-        Order &lowestAsk = m_asks.begin()->second;
+        Order &lowestAsk = m_asks.begin()->second.front();
         Price lowestAskPrice = lowestAsk.getPrice();
         // check the lowest ask
         while (!m_asks.empty() && price >= lowestAskPrice) {
@@ -86,27 +49,31 @@ public:
             quantity = 0;
             break;
           } else {
+            // erase the ask from both the activeOrders map and the asks queue
             m_asks.erase(m_asks.begin());
+            m_activeOrders.erase(lowestAsk.getId());
             quantity -= lowestAskQuantity;
             m_trades.emplace_back(currId, lowestAsk.getId(), lowestAskPrice,
                                   lowestAskQuantity, currNs);
           }
-          lowestAsk = m_asks.begin()->second;
+          lowestAsk = m_asks.begin()->second.front();
           lowestAskPrice = lowestAsk.getPrice();
         }
       }
 
       if (quantity > 0) {
         // if the order isn't filled completely, add it to the list
-        auto [it, success] = m_bids.try_emplace(
-            currId, currId, side, price, quantity,
-            currNs); // try_emplace constructs object in place in map
-        assert(success);
+        PriceLevel &priceLevel = m_bids[price];
+        // add to end of PriceLevel list
+        auto it = priceLevel.emplace(priceLevel.end(), currId, side, price,
+                                     quantity, currNs);
+        // add to activeOrders map
+        m_activeOrders[currId] = it;
       }
 
     } else if (side == Side::SELL) {
       if (!m_bids.empty()) {
-        Order &highestBid = m_bids.begin()->second;
+        Order &highestBid = m_bids.begin()->second.front();
         Price highestBidPrice = highestBid.getPrice();
         // check the lowest bid
         while (!m_bids.empty() && price <= highestBidPrice) {
@@ -121,21 +88,24 @@ public:
             quantity = 0;
             break;
           } else {
+            // erase the order from both the activeOrders map and the bids queue
             m_bids.erase(m_bids.begin());
+            m_activeOrders.erase(highestBid.getId());
             quantity -= highestBidQuantity;
             m_trades.emplace_back(currId, highestBid.getId(), highestBidPrice,
                                   highestBidQuantity, currNs);
           }
-          highestBid = m_bids.begin()->second;
+          highestBid = m_bids.begin()->second.front();
           highestBidPrice = highestBid.getPrice();
         }
       }
 
       if (quantity > 0) {
         // if the order isn't filled completely, add it to the list
-        auto [it, success] =
-            m_asks.try_emplace(currId, currId, side, price, quantity, currNs);
-        assert(success);
+        PriceLevel &priceLevel = m_asks[price];
+        auto it = priceLevel.emplace(priceLevel.end(), currId, side, price,
+                                     quantity, currNs);
+        m_activeOrders[currId] = it;
       }
     }
 
@@ -154,5 +124,3 @@ public:
     return true;
   }
 };
-
-int main() { return 0; }
