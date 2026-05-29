@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Using.h>
+#include <iostream>
 
 class Trade {
 private:
@@ -15,4 +16,9 @@ public:
         Timestamp timestamp)
       : m_bidId(bidId), m_askId(askId), m_price(price), m_quantity(quantity),
         m_timestamp(timestamp) {}
+  void display() const {
+    std::cout << "\nBid Order Id: " << m_bidId << "\nAsk Order Id: " << m_askId
+              << "\nPrice: " << m_price << "\nQuantity: " << m_quantity
+              << "\nTimestamp: " << m_timestamp << std::endl;
+  }
 };
