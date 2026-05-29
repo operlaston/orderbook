@@ -6,7 +6,7 @@ Orderbook::Orderbook() { currId = 0; }
 
 // returns the remaining quantity of the order
 Quantity Orderbook::matchOrder(Side side, Price price, Quantity quantity,
-                               Timestamp currNs) {
+                               Timestamp timestamp) {
   if (side == Side::BUY) {
     if (!m_asks.empty()) {
       Order &lowestAsk = m_asks.begin()->second.front();
@@ -21,7 +21,7 @@ Quantity Orderbook::matchOrder(Side side, Price price, Quantity quantity,
         if (lowestAskQuantity >= quantity) {
           lowestAsk.setQuantity(lowestAskQuantity - quantity);
           m_trades.emplace_back(currId, lowestAsk.getId(), lowestAskPrice,
-                                quantity, currNs);
+                                quantity, timestamp);
           quantity = 0;
           break;
         } else {
@@ -31,7 +31,7 @@ Quantity Orderbook::matchOrder(Side side, Price price, Quantity quantity,
           // update quantity and log trade
           quantity -= lowestAskQuantity;
           m_trades.emplace_back(currId, lowestAsk.getId(), lowestAskPrice,
-                                lowestAskQuantity, currNs);
+                                lowestAskQuantity, timestamp);
 
           // break if there are no more asks
           if (m_asks.empty())
@@ -55,7 +55,7 @@ Quantity Orderbook::matchOrder(Side side, Price price, Quantity quantity,
         if (highestBidQuantity >= quantity) {
           highestBid.setQuantity(highestBidQuantity - quantity);
           m_trades.emplace_back(currId, highestBid.getId(), highestBidPrice,
-                                quantity, currNs);
+                                quantity, timestamp);
           quantity = 0;
           break;
         } else {
@@ -65,7 +65,7 @@ Quantity Orderbook::matchOrder(Side side, Price price, Quantity quantity,
           // update quantity and log trade
           quantity -= highestBidQuantity;
           m_trades.emplace_back(currId, highestBid.getId(), highestBidPrice,
-                                highestBidQuantity, currNs);
+                                highestBidQuantity, timestamp);
 
           if (m_bids.empty())
             break;
@@ -79,7 +79,8 @@ Quantity Orderbook::matchOrder(Side side, Price price, Quantity quantity,
   return quantity;
 }
 
-void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
+void Orderbook::addOrder(Side side, Price price, Quantity quantity,
+                         OrderType orderType, TimeInForce timeInForce) {
   // make sure side is either sell or buy
   if (side != Side::SELL && side != Side::BUY) {
     return;
@@ -93,12 +94,9 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
   }
 
   // get current time in nanoseconds since the epoch
-  auto now = std::chrono::high_resolution_clock::now();
-  auto duration = now.time_since_epoch();
-  Timestamp currNs =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
+  Timestamp timestamp = std::chrono::system_clock::now();
 
-  Quantity remainingQuantity = matchOrder(side, price, quantity, currNs);
+  Quantity remainingQuantity = matchOrder(side, price, quantity, timestamp);
 
   // first check if the order can immediately be filled
   if (side == Side::BUY) {
@@ -108,7 +106,8 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
       PriceLevel &priceLevel = m_bids[price];
       // add to end of PriceLevel list
       auto it = priceLevel.emplace(priceLevel.end(), currId, side, price,
-                                   remainingQuantity, currNs);
+                                   remainingQuantity, timestamp, orderType,
+                                   timeInForce);
       // add to activeOrders map
       m_activeOrders[currId] = it;
     }
@@ -119,7 +118,8 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
       // if the order isn't filled completely, add it to the list
       PriceLevel &priceLevel = m_asks[price];
       auto it = priceLevel.emplace(priceLevel.end(), currId, side, price,
-                                   remainingQuantity, currNs);
+                                   remainingQuantity, timestamp, orderType,
+                                   timeInForce);
       m_activeOrders[currId] = it;
     }
   }

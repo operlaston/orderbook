@@ -18,11 +18,15 @@ private:
   std::vector<Trade> m_trades;
   OrderId currId;
   Quantity matchOrder(Side side, Price price, Quantity quantity,
-                      Timestamp currNs);
+                      Timestamp timestamp);
+  void fillOrKill(Side side, Price price, Quantity quantity,
+                  Timestamp timestamp);
 
 public:
   Orderbook();
-  void addOrder(Side side, Price price, Quantity quantity);
+  void addOrder(Side side, Price price, Quantity quantity,
+                OrderType orderType = OrderType::LIMIT,
+                TimeInForce timeInForce = TimeInForce::GOOD_TILL_CANCEL);
   void removeOrder(OrderId orderId);
   void modifyOrder(OrderId orderId, Quantity newQuantity);
   void printOrderbook();

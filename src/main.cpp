@@ -18,6 +18,7 @@ int main() {
   // orderbook.printOrderbook();
   // orderbook.printTrades();
   orderbook.addOrder(Side::BUY, 102.37, 80);
+  orderbook.modifyOrder(4, 5);
   orderbook.printOrderbook();
   orderbook.printTrades();
   return 0;

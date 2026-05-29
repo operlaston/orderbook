@@ -1,9 +1,10 @@
 #pragma once
 
+#include <OrderType.h>
 #include <Side.h>
+#include <TimeInForce.h>
 #include <Using.h>
 #include <iostream>
-#include <string>
 
 class Order {
 private:
@@ -12,12 +13,16 @@ private:
   Price m_price;
   Quantity m_quantity;
   Timestamp m_timestamp;
+  OrderType m_orderType;
+  TimeInForce m_timeInForce;
 
 public:
   Order(OrderId id, Side side, Price price, Quantity quantity,
-        Timestamp timestamp)
+        Timestamp timestamp, OrderType orderType = OrderType::LIMIT,
+        TimeInForce timeInForce = TimeInForce::GOOD_TILL_CANCEL)
       : m_id(id), m_side(side), m_price(price), m_quantity(quantity),
-        m_timestamp(timestamp) {}
+        m_timestamp(timestamp), m_orderType(orderType),
+        m_timeInForce(timeInForce) {}
 
   OrderId getId() { return m_id; }
   Price getPrice() { return m_price; }
@@ -26,15 +31,9 @@ public:
   void setQuantity(Quantity quantity) { m_quantity = quantity; }
 
   void display() const {
-    std::string side;
-    if (m_side == Side::BUY) {
-      side = "BUY";
-    } else if (m_side == Side::SELL) {
-      side = "SELL";
-    } else {
-      side = "UNKNOWN/ERROR";
-    }
-    std::cout << "\nOrderId: " << m_id << "\nSide: " << side
+    std::cout << "\nOrderId: " << m_id << "\nSide: " << static_cast<int>(m_side)
+              << "\nOrderType: " << static_cast<int>(m_orderType)
+              << "\nTimeInForce: " << static_cast<int>(m_timeInForce)
               << "\nPrice: " << m_price << "\nQuantity: " << m_quantity
               << "\nTimestamp: " << m_timestamp << std::endl;
   }
