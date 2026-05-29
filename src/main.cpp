@@ -13,15 +13,14 @@ int main() {
   orderbook.addOrder(Side::SELL, 101.04, 70);
   // orderbook.printOrderbook();
   // orderbook.printTrades();
-  // orderbook.addOrder(Side::SELL, 101.04, 60);
+  orderbook.addOrder(Side::SELL, 101.04, 60);
   // orderbook.printOrderbook();
   // orderbook.printTrades();
   orderbook.addOrder(Side::BUY, 99.28, 50);
   // orderbook.printOrderbook();
   // orderbook.printTrades();
-  orderbook.addOrder(Side::BUY, 102.37, 80, OrderType::LIMIT,
-                     TimeInForce::IMMEDIATE_OR_CANCEL);
-  // orderbook.modifyOrder(4, 5);
+  orderbook.addOrder(Side::BUY, 102.37, 80);
+  orderbook.removeOrder(4);
   orderbook.printOrderbook();
   orderbook.printTrades();
   return 0;
