@@ -18,62 +18,62 @@ Quantity Orderbook::matchOrder(const Order &incomingOrder) {
   }
 
   if (side == Side::BUY && !m_asks.empty()) {
-    Order *lowestAsk = &m_asks.begin()->second.front();
-    Price lowestAskPrice = lowestAsk->getPrice();
+    auto lowestAskIt = m_asks.begin()->second.begin();
+    Price lowestAskPrice = lowestAskIt->getPrice();
     // check the lowest ask
     while (price >= lowestAskPrice) {
 
-      Quantity lowestAskQuantity = lowestAsk->getQuantity();
+      Quantity lowestAskQuantity = lowestAskIt->getQuantity();
 
       // fill the order and break out of loop if bid quantity does
       // not exceed lowest ask quantity
       if (lowestAskQuantity > quantity) {
-        lowestAsk->setQuantity(lowestAskQuantity - quantity);
-        m_trades.emplace_back(currId, lowestAsk->getId(), lowestAskPrice,
+        lowestAskIt->setQuantity(lowestAskQuantity - quantity);
+        m_trades.emplace_back(currId, lowestAskIt->getId(), lowestAskPrice,
                               quantity, timestamp);
         quantity = 0;
         break;
       } else {
-        removeOrder(lowestAsk->getId());
+        removeOrder(lowestAskIt->getId());
         quantity -= lowestAskQuantity;
-        m_trades.emplace_back(currId, lowestAsk->getId(), lowestAskPrice,
+        m_trades.emplace_back(currId, lowestAskIt->getId(), lowestAskPrice,
                               lowestAskQuantity, timestamp);
         if (m_asks.empty())
           break;
 
-        lowestAsk = &m_asks.begin()->second.front();
-        lowestAskPrice = lowestAsk->getPrice();
+        lowestAskIt = m_asks.begin()->second.begin();
+        lowestAskPrice = lowestAskIt->getPrice();
       }
     }
   } else if (side == Side::SELL && !m_bids.empty()) {
-    Order *highestBid = &m_bids.begin()->second.front();
-    Price highestBidPrice = highestBid->getPrice();
+    auto highestBidIt = m_bids.begin()->second.begin();
+    Price highestBidPrice = highestBidIt->getPrice();
     // check the lowest bid
     while (price <= highestBidPrice) {
-      Quantity highestBidQuantity = highestBid->getQuantity();
+      Quantity highestBidQuantity = highestBidIt->getQuantity();
 
       // fill the order and break out of loop if bid quantity does
       // not exceed lowest ask quantity
       if (highestBidQuantity > quantity) {
-        highestBid->setQuantity(highestBidQuantity - quantity);
-        m_trades.emplace_back(currId, highestBid->getId(), highestBidPrice,
+        highestBidIt->setQuantity(highestBidQuantity - quantity);
+        m_trades.emplace_back(currId, highestBidIt->getId(), highestBidPrice,
                               quantity, timestamp);
         quantity = 0;
         break;
       } else {
         // remove filled order
-        removeOrder(highestBid->getId());
+        removeOrder(highestBidIt->getId());
 
         // update quantity and log trade
         quantity -= highestBidQuantity;
-        m_trades.emplace_back(currId, highestBid->getId(), highestBidPrice,
+        m_trades.emplace_back(currId, highestBidIt->getId(), highestBidPrice,
                               highestBidQuantity, timestamp);
 
         if (m_bids.empty())
           break;
 
-        highestBid = &m_bids.begin()->second.front();
-        highestBidPrice = highestBid->getPrice();
+        highestBidIt = m_bids.begin()->second.begin();
+        highestBidPrice = highestBidIt->getPrice();
       }
     }
   }
@@ -89,7 +89,7 @@ bool Orderbook::canFill(const Order &incomingOrder) {
     auto currPriceLevel = m_asks.begin();
     PriceLevel *currPriceList = &currPriceLevel->second;
     auto currPriceListIter = currPriceList->begin();
-    Order lowestAsk = *currPriceListIter;
+    Order &lowestAsk = *currPriceListIter;
     Price lowestAskPrice = lowestAsk.getPrice();
     // check the lowest ask
     while (price >= lowestAskPrice) {
