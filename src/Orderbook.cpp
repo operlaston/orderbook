@@ -13,7 +13,6 @@ Quantity Orderbook::matchOrder(const Order &incomingOrder) {
 
   if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL &&
       !canFill(incomingOrder)) {
-    std::cout << "\nCan't fill FoK order. Cancelling order." << std::endl;
     return quantity;
   }
 
