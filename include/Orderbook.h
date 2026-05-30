@@ -3,7 +3,6 @@
 #include <Order.h>
 #include <Trade.h>
 #include <Using.h>
-#include <assert.h>
 #include <functional>
 #include <list>
 #include <map>

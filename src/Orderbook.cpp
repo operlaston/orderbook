@@ -142,7 +142,7 @@ bool Orderbook::canFill(const Order &incomingOrder) {
           currPriceList = &currPriceLevel->second;
           currPriceListIter = currPriceList->begin();
         }
-        highestBid = m_bids.begin()->second.front();
+        highestBid = *currPriceListIter;
         highestBidPrice = highestBid.getPrice();
       }
     }
