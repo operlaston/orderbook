@@ -1,8 +1,11 @@
 #pragma once
+#include <Session.h>
 #include <cstdint>
+#include <vector>
 
 class Server {
 private:
+  std::vector<Session> m_sessions;
   int m_socket = -1;
 
 public:
