@@ -1,12 +1,22 @@
 #include <Server.h>
+#include <array>
 #include <cstring>
 #include <iostream>
 #include <netinet/in.h>
 #include <stdexcept>
+#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 Server::Server(uint16_t port) {
+
+  // initialize epoll fd
+  m_epollFd = ::epoll_create1(0);
+  if (m_epollFd == -1) {
+    throw std::runtime_error("Failed to create epoll instance");
+  }
+
+  // initialize server socket
   m_socket = ::socket(AF_INET, SOCK_STREAM, 0);
   if (m_socket == -1) {
     throw std::runtime_error("Failed to create socket");
@@ -28,6 +38,8 @@ Server::Server(uint16_t port) {
     return;
   }
 
+  addFdEpoll(m_socket);
+
   std::cout << "Server started on port " << port << std::endl;
 }
 
@@ -35,20 +47,52 @@ Server::~Server() {
   if (m_socket != -1) {
     ::close(m_socket);
   }
+  if (m_epollFd != -1) {
+    ::close(m_epollFd);
+  }
+}
+
+bool Server::addFdEpoll(int fd) {
+  struct epoll_event sessionFdEvent{};
+  sessionFdEvent.events = EPOLLIN;
+  sessionFdEvent.data.fd = fd;
+  return ::epoll_ctl(m_epollFd, EPOLL_CTL_ADD, fd, &sessionFdEvent) == 0;
+}
+
+bool Server::removeFdEpoll(int fd) {
+  return ::epoll_ctl(m_epollFd, EPOLL_CTL_DEL, fd, NULL) == 0;
+}
+
+void Server::acceptClient() {
+  int clientSocket = -1;
+  // i dont care about the client's ip for now
+  if ((clientSocket = ::accept(m_socket, NULL, NULL)) < 0) {
+    throw std::runtime_error("Failed to accept tcp connection");
+  }
+
+  if (!addFdEpoll(clientSocket)) {
+    throw std::runtime_error("Failed to add client fd to epoll interest list");
+  }
+  m_sessions.emplace_back(clientSocket);
 }
 
 void Server::run() {
+  std::array<struct epoll_event, SOMAXCONN> revents;
 
   while (true) {
-    // dont care about client ip addresses for now
-    // keeping this here in case i want to support it later
-    // struct sockaddr_in clientAddr;
-    // memset(&clientAddr, 0, sizeof(clientAddr));
-    // socklen_t clientAddrSize = sizeof(clientAddr);
+    int numEvents = epoll_wait(m_epollFd, revents.data(), revents.size(), -1);
 
-    int clientSocket = -1;
-    if ((clientSocket = ::accept(m_socket, NULL, NULL)) < 0) {
-      throw std::runtime_error("Failed to accept tcp connection");
+    if (numEvents == -1) {
+      throw std::runtime_error("Failed to receive events from epoll_wait");
+    }
+
+    for (int i = 0; i < numEvents; i++) {
+      struct epoll_event currEvent = revents[i];
+      if (currEvent.data.fd == m_socket) {
+        acceptClient();
+      } else {
+        // TODO: handle client message
+      }
     }
   }
 }
