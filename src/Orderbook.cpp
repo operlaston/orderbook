@@ -152,8 +152,22 @@ bool Orderbook::canFill(const Order &incomingOrder) {
 
 void Orderbook::addOrder(Side side, Price price, Quantity quantity,
                          OrderType orderType, TimeInForce timeInForce) {
+
   if (side != Side::SELL && side != Side::BUY) {
     return;
+  }
+
+  if (orderType == OrderType::MARKET) {
+    timeInForce = TimeInForce::IMMEDIATE_OR_CANCEL;
+    if (side == Side::BUY) {
+      if (m_asks.empty())
+        return;
+      price = std::prev(m_asks.end())->first;
+    } else {
+      if (m_bids.empty())
+        return;
+      price = std::prev(m_bids.end())->first;
+    }
   }
 
   if (price <= 0 || quantity <= 0) {

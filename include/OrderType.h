@@ -1,3 +1,3 @@
 #pragma once
 
-enum class OrderType { LIMIT };
+enum class OrderType { MARKET, LIMIT };
