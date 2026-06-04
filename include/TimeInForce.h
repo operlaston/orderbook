@@ -2,7 +2,7 @@
 
 enum class TimeInForce {
   NONE,
-  FILL_OR_KILL,
+  GOOD_TILL_CANCEL,
   IMMEDIATE_OR_CANCEL,
-  GOOD_TILL_CANCEL
+  FILL_OR_KILL,
 };
