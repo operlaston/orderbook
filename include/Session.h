@@ -1,10 +1,13 @@
 #pragma once
+#include <cstdint>
 #include <unistd.h>
 
 class Session {
 private:
   // client socket file descriptor
   int m_socket = -1;
+  uint32_t m_activeRequests = 0;
+  bool m_closed = false;
 
 public:
   Session(int socketFd) : m_socket(socketFd) {}
@@ -30,4 +33,8 @@ public:
     }
   }
   int getSocket() const { return m_socket; }
+  int getActiveRequests() const { return m_activeRequests; }
+  void markClosed() { m_closed = true; }
+  void addActiveRequest() { m_activeRequests++; }
+  void removeActiveRequest() { m_activeRequests--; }
 };

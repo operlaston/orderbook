@@ -1,8 +1,8 @@
 #pragma once
 
 enum class TimeInForce {
-  NONE,
-  GOOD_TILL_CANCEL,
-  IMMEDIATE_OR_CANCEL,
-  FILL_OR_KILL,
+  NONE = 0,
+  GOOD_TILL_CANCEL = 1,
+  IMMEDIATE_OR_CANCEL = 2,
+  FILL_OR_KILL = 3,
 };

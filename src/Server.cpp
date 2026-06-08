@@ -1,12 +1,25 @@
+#include <GlobalConsts.h>
+#include <MessageType.h>
+#include <OrderRequest.h>
+#include <OrderType.h>
 #include <Server.h>
+#include <Side.h>
+#include <TimeInForce.h>
+#include <Using.h>
 #include <array>
+#include <bit>
+#include <cassert>
+#include <cerrno>
+#include <cstdint>
 #include <cstring>
+#include <endian.h>
 #include <fcntl.h>
 #include <iostream>
 #include <netinet/in.h>
 #include <stdexcept>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <system_error>
 #include <unistd.h>
 
 Server::Server(uint16_t port) {
@@ -53,16 +66,29 @@ Server::~Server() {
   }
 }
 
-bool Server::addFdEpoll(int fd) {
+void Server::addFdEpoll(int fd) {
   struct epoll_event sessionFdEvent{};
   sessionFdEvent.events = EPOLLIN;
   sessionFdEvent.data.fd = fd;
-  return ::epoll_ctl(m_epollFd, EPOLL_CTL_ADD, fd, &sessionFdEvent) == 0;
+  if (::epoll_ctl(m_epollFd, EPOLL_CTL_ADD, fd, &sessionFdEvent) == -1) {
+    throw std::system_error(errno, std::generic_category(),
+                            "Failed to add fd to epoll interest list");
+  }
 }
 
-bool Server::removeFdEpoll(int fd) {
-  return ::epoll_ctl(m_epollFd, EPOLL_CTL_DEL, fd, NULL) == 0;
+void Server::removeFdEpoll(int fd) {
+  if (epoll_ctl(m_epollFd, EPOLL_CTL_DEL, fd, NULL) == -1) {
+    throw std::system_error(errno, std::generic_category(),
+                            "Failed to remove fd from epoll interest list");
+  }
 }
+
+void Server::removeSession(int fd) {
+  m_sessions.erase(fd);
+  removeFdEpoll(fd);
+}
+
+void Server::markSessionClosed(int fd) { m_sessions[fd].markClosed(); }
 
 void Server::acceptClient() {
   int clientSocket = -1;
@@ -82,10 +108,10 @@ void Server::acceptClient() {
   }
 
   // add client socket to epoll interest list
-  if (!addFdEpoll(clientSocket)) {
-    throw std::runtime_error("Failed to add client fd to epoll interest list");
-  }
-  m_sessions.emplace_back(clientSocket);
+  addFdEpoll(clientSocket);
+
+  auto [it, didEmplace] = m_sessions.try_emplace(clientSocket, clientSocket);
+  assert(didEmplace);
 }
 
 void Server::run() {
@@ -100,14 +126,76 @@ void Server::run() {
 
     for (int i = 0; i < numEvents; i++) {
       struct epoll_event currEvent = revents[i];
-      if (currEvent.data.fd == m_socket) {
+      int currFd = currEvent.data.fd;
+      if (currFd == m_socket) {
         acceptClient();
       }
-      // else if (currEvent.data.fd == eventFd) {
+      // else if (currFd == eventFd) {
       //
       // }
       else {
-        // TODO: handle client message
+        // handle all messages currently in the buffer
+        while (true) {
+          uint8_t messageTypeRaw;
+          int bytesRead = read(currFd, &messageTypeRaw, 1);
+          if (bytesRead == 0) { // client closed their end
+            markSessionClosed(currFd);
+            // if not processing any active requests from this client
+            // remove the session object from the session map
+            if (m_sessions[currFd].getActiveRequests() == 0) {
+              removeSession(currFd);
+            }
+            break;
+          } else if (bytesRead == -1) {
+            if (errno == EAGAIN) { // no more messages to read
+              break;
+            } else { // unknown error occurred, remove the session
+              removeSession(currFd);
+            }
+          }
+
+          MessageType messageType = static_cast<MessageType>(messageTypeRaw);
+
+          if (messageType == MessageType::ORDER) {
+            // 1 byte Side, 1 byte OrderType, 1 byte TimeInForce, 8 byte Price,
+            // 8 byte Quantity
+            Side side;
+            OrderType orderType;
+            TimeInForce timeInForce;
+            uint64_t priceRaw;
+            uint64_t quantityRaw;
+
+            std::array<uint8_t, MessageLength::ORDER> buf;
+            bytesRead = read(currFd, buf.data(), buf.size());
+            if (bytesRead == 0) {
+              markSessionClosed(currFd);
+              write(currFd, &ResponseStatus::MALFORMED_REQUEST, 1);
+              break;
+            } else if (bytesRead != buf.size()) {
+              write(currFd, &ResponseStatus::MALFORMED_REQUEST, 1);
+              break;
+            }
+            side = static_cast<Side>(buf[0]);
+            orderType = static_cast<OrderType>(buf[1]);
+            timeInForce = static_cast<TimeInForce>(buf[2]);
+            std::memcpy(&priceRaw, &buf[3], sizeof(Price));
+            std::memcpy(&quantityRaw, &buf[11], sizeof(Quantity));
+
+            Price price = be64toh(priceRaw);
+            price = std::bit_cast<Price>(priceRaw);
+            Quantity quantity = be64toh(quantityRaw);
+
+            OrderRequest req{side, orderType, timeInForce, price, quantity};
+            m_sessions[currFd].addActiveRequest();
+
+            // TODO: push the request onto the spsc queue
+
+          } else {
+            // invalid message type (maybe supported in the future)
+            write(currFd, &ResponseStatus::INVALID_MESSAGE_TYPE, 1);
+            break;
+          }
+        }
       }
     }
   }
