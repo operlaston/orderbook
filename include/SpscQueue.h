@@ -17,7 +17,7 @@ static constexpr size_t CACHE_LINE_SIZE = 64;
 template <typename T, size_t Capacity> class SpscQueue {
 private:
   static constexpr size_t m_capacity = Capacity + 1;
-  T m_buffer[Capacity + 1];
+  alignas(CACHE_LINE_SIZE) T m_buffer[Capacity + 1];
 
   alignas(CACHE_LINE_SIZE) std::atomic<size_t> m_readPtr;
   alignas(CACHE_LINE_SIZE) std::atomic<size_t> m_writePtr;

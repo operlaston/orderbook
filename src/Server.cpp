@@ -165,7 +165,7 @@ void Server::run() {
             uint64_t priceRaw;
             uint64_t quantityRaw;
 
-            std::array<uint8_t, MessageLength::ORDER> buf;
+            std::array<uint8_t, GlobalLengths::ORDER_MESSAGE> buf;
             bytesRead = read(currFd, buf.data(), buf.size());
             if (bytesRead == 0) {
               markSessionClosed(currFd);
