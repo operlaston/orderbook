@@ -1,6 +1,7 @@
 #include <Server.h>
 #include <array>
 #include <cstring>
+#include <fcntl.h>
 #include <iostream>
 #include <netinet/in.h>
 #include <stdexcept>
@@ -17,7 +18,7 @@ Server::Server(uint16_t port) {
   }
 
   // initialize server socket
-  m_socket = ::socket(AF_INET, SOCK_STREAM, 0);
+  m_socket = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
   if (m_socket == -1) {
     throw std::runtime_error("Failed to create socket");
     return;
@@ -70,6 +71,17 @@ void Server::acceptClient() {
     throw std::runtime_error("Failed to accept tcp connection");
   }
 
+  // make socket nonblocking while maintaing current flags
+  int currFlags = fcntl(clientSocket, F_GETFL, 0);
+  if (currFlags == -1) {
+    throw std::runtime_error("Failed to get flags of client socket");
+  }
+  currFlags |= O_NONBLOCK;
+  if (fcntl(clientSocket, F_SETFL, currFlags) == -1) {
+    throw std::runtime_error("Failed to set flags of clietn socket");
+  }
+
+  // add client socket to epoll interest list
   if (!addFdEpoll(clientSocket)) {
     throw std::runtime_error("Failed to add client fd to epoll interest list");
   }
@@ -90,7 +102,11 @@ void Server::run() {
       struct epoll_event currEvent = revents[i];
       if (currEvent.data.fd == m_socket) {
         acceptClient();
-      } else {
+      }
+      // else if (currEvent.data.fd == eventFd) {
+      //
+      // }
+      else {
         // TODO: handle client message
       }
     }
