@@ -1,6 +1,7 @@
 #pragma once
 
 #include <OrderRequest.h>
+#include <OrderResponse.h>
 #include <SpscQueue.h>
 #include <cerrno>
 #include <sys/eventfd.h>
@@ -9,7 +10,7 @@
 
 struct ServerEngineContext {
   alignas(CACHE_LINE_SIZE) SpscQueue<OrderRequest, 65536> incomingRequests;
-  alignas(CACHE_LINE_SIZE) SpscQueue<uint8_t, 65536> outgoingResponses;
+  alignas(CACHE_LINE_SIZE) SpscQueue<OrderResponse, 65536> outgoingResponses;
   alignas(CACHE_LINE_SIZE) int eventFd = -1;
 
   ServerEngineContext() {

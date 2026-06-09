@@ -2,7 +2,6 @@
 #include "ServerEngineContext.h"
 #include <Session.h>
 #include <cstdint>
-#include <memory>
 #include <unordered_map>
 
 class Server {

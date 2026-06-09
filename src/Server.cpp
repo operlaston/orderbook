@@ -134,11 +134,9 @@ void Server::run() {
       int currFd = currEvent.data.fd;
       if (currFd == m_socket) {
         acceptClient();
-      }
-      // else if (currFd == eventFd) {
-      //
-      // }
-      else {
+      } else if (currFd == m_ctx.eventFd) {
+        // read responses and forward them back to proper client
+      } else {
         // handle all messages currently in the buffer
         while (true) {
           uint8_t messageTypeRaw;
@@ -193,8 +191,8 @@ void Server::run() {
             OrderRequest req{side, orderType, timeInForce, price, quantity};
             m_sessions[currFd].addActiveRequest();
 
-            // TODO: push the request onto the spsc queue
-
+            // push the request onto the spsc queue
+            m_ctx.incomingRequests.push(req);
           } else {
             // invalid message type (maybe supported in the future)
             write(currFd, &ResponseStatus::INVALID_MESSAGE_TYPE, 1);
