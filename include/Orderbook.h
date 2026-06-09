@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ServerEngineContext.h"
 #include <Order.h>
 #include <Trade.h>
 #include <Using.h>
@@ -15,12 +16,14 @@ private:
   std::map<Price, std::list<Order>> m_asks;
   std::unordered_map<OrderId, std::list<Order>::iterator> m_activeOrders;
   std::vector<Trade> m_trades;
-  OrderId currId;
+  OrderId m_currId = 0;
+  ServerEngineContext &m_ctx;
   Quantity matchOrder(const Order &incomingOrder);
   bool canFill(const Order &incomingOrder);
 
 public:
-  Orderbook();
+  // Orderbook();
+  Orderbook(ServerEngineContext &ctx);
   void addOrder(Side side, Price price, Quantity quantity,
                 OrderType orderType = OrderType::LIMIT,
                 TimeInForce timeInForce = TimeInForce::GOOD_TILL_CANCEL);

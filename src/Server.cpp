@@ -1,3 +1,4 @@
+#include "ServerEngineContext.h"
 #include <GlobalConsts.h>
 #include <MessageType.h>
 #include <OrderRequest.h>
@@ -22,8 +23,13 @@
 #include <system_error>
 #include <unistd.h>
 
-Server::Server(uint16_t port) {
+// Server::Server(uint16_t port) { initFds(port); }
 
+Server::Server(ServerEngineContext &ctx, uint16_t port) : m_ctx(ctx) {
+  initFds(port);
+}
+
+void Server::initFds(uint16_t port) {
   // initialize epoll fd
   m_epollFd = ::epoll_create1(0);
   if (m_epollFd == -1) {
@@ -53,7 +59,6 @@ Server::Server(uint16_t port) {
   }
 
   addFdEpoll(m_socket);
-
   std::cout << "Server started on port " << port << std::endl;
 }
 

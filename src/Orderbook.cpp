@@ -1,8 +1,11 @@
+#include "ServerEngineContext.h"
 #include <Orderbook.h>
 #include <chrono>
 #include <iostream>
 
-Orderbook::Orderbook() { currId = 0; }
+// Orderbook::Orderbook() {}
+
+Orderbook::Orderbook(ServerEngineContext &ctx) : m_ctx(ctx) {}
 
 // returns the remaining quantity of the order
 Quantity Orderbook::matchOrder(const Order &incomingOrder) {
@@ -28,14 +31,14 @@ Quantity Orderbook::matchOrder(const Order &incomingOrder) {
       // not exceed lowest ask quantity
       if (lowestAskQuantity > quantity) {
         lowestAskIt->setQuantity(lowestAskQuantity - quantity);
-        m_trades.emplace_back(currId, lowestAskIt->getId(), lowestAskPrice,
+        m_trades.emplace_back(m_currId, lowestAskIt->getId(), lowestAskPrice,
                               quantity, timestamp);
         quantity = 0;
         break;
       } else {
         removeOrder(lowestAskIt->getId());
         quantity -= lowestAskQuantity;
-        m_trades.emplace_back(currId, lowestAskIt->getId(), lowestAskPrice,
+        m_trades.emplace_back(m_currId, lowestAskIt->getId(), lowestAskPrice,
                               lowestAskQuantity, timestamp);
         if (m_asks.empty())
           break;
@@ -55,14 +58,14 @@ Quantity Orderbook::matchOrder(const Order &incomingOrder) {
       // not exceed lowest ask quantity
       if (highestBidQuantity > quantity) {
         highestBidIt->setQuantity(highestBidQuantity - quantity);
-        m_trades.emplace_back(currId, highestBidIt->getId(), highestBidPrice,
+        m_trades.emplace_back(m_currId, highestBidIt->getId(), highestBidPrice,
                               quantity, timestamp);
         quantity = 0;
         break;
       } else {
         removeOrder(highestBidIt->getId());
         quantity -= highestBidQuantity;
-        m_trades.emplace_back(currId, highestBidIt->getId(), highestBidPrice,
+        m_trades.emplace_back(m_currId, highestBidIt->getId(), highestBidPrice,
                               highestBidQuantity, timestamp);
 
         if (m_bids.empty())
@@ -166,7 +169,8 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity,
 
   Timestamp timestamp = std::chrono::system_clock::now();
 
-  Order order(currId, side, price, quantity, timestamp, orderType, timeInForce);
+  Order order(m_currId, side, price, quantity, timestamp, orderType,
+              timeInForce);
 
   Quantity remainingQuantity = matchOrder(order);
 
@@ -182,11 +186,11 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity,
     if (remainingQuantity > 0) {
       PriceLevel &priceLevel = m_bids[price];
       priceLevel.push_back(order);
-      m_activeOrders[currId] = std::prev(priceLevel.end());
-      // auto it = priceLevel.emplace(priceLevel.end(), currId, side, price,
+      m_activeOrders[m_currId] = std::prev(priceLevel.end());
+      // auto it = priceLevel.emplace(priceLevel.end(), m_currId, side, price,
       //                              remainingQuantity, timestamp, orderType,
       //                              timeInForce);
-      // m_activeOrders[currId] = it;
+      // m_activeOrders[m_currId] = it;
     }
 
   } else if (side == Side::SELL) {
@@ -194,15 +198,15 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity,
     if (remainingQuantity > 0) {
       PriceLevel &priceLevel = m_asks[price];
       priceLevel.push_back(order);
-      m_activeOrders[currId] = std::prev(priceLevel.end());
-      // auto it = priceLevel.emplace(priceLevel.end(), currId, side, price,
+      m_activeOrders[m_currId] = std::prev(priceLevel.end());
+      // auto it = priceLevel.emplace(priceLevel.end(), m_currId, side, price,
       //                              remainingQuantity, timestamp, orderType,
       //                              timeInForce);
-      // m_activeOrders[currId] = it;
+      // m_activeOrders[m_currId] = it;
     }
   }
 
-  currId++;
+  m_currId++;
 }
 
 void Orderbook::removeOrder(OrderId orderId) {
