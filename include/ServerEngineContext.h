@@ -14,7 +14,7 @@ struct ServerEngineContext {
   alignas(CACHE_LINE_SIZE) int eventFd = -1;
 
   ServerEngineContext() {
-    eventFd = eventfd(0, EFD_NONBLOCK);
+    eventFd = eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE);
     if (eventFd == -1) {
       std::system_error(errno, std::generic_category(),
                         "Failed to create eventFd");
