@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ServerEngineContext.h"
 #include <Order.h>
+#include <ServerEngineContext.h>
 #include <Trade.h>
 #include <Using.h>
 #include <functional>
@@ -31,4 +31,5 @@ public:
   void modifyOrder(OrderId orderId, Quantity newQuantity);
   void printOrderbook();
   void printTrades();
+  void run();
 };

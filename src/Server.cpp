@@ -1,9 +1,9 @@
-#include "ServerEngineContext.h"
 #include <GlobalConsts.h>
 #include <MessageType.h>
-#include <OrderRequest.h>
 #include <OrderType.h>
+#include <RequestTypes.h>
 #include <Server.h>
+#include <ServerEngineContext.h>
 #include <Side.h>
 #include <TimeInForce.h>
 #include <Using.h>
@@ -159,7 +159,7 @@ void Server::run() {
 
           MessageType messageType = static_cast<MessageType>(messageTypeRaw);
 
-          if (messageType == MessageType::ORDER) {
+          if (messageType == MessageType::NEW_ORDER) {
             // 1 byte Side, 1 byte OrderType, 1 byte TimeInForce, 8 byte Price,
             // 8 byte Quantity
             Side side;
@@ -172,10 +172,10 @@ void Server::run() {
             bytesRead = read(currFd, buf.data(), buf.size());
             if (bytesRead == 0) {
               markSessionClosed(currFd);
-              write(currFd, &ResponseStatus::MALFORMED_REQUEST, 1);
+              write(currFd, &ResponseStatus::BAD_REQUEST, 1);
               break;
             } else if (bytesRead != buf.size()) {
-              write(currFd, &ResponseStatus::MALFORMED_REQUEST, 1);
+              write(currFd, &ResponseStatus::BAD_REQUEST, 1);
               break;
             }
             side = static_cast<Side>(buf[0]);
@@ -188,11 +188,12 @@ void Server::run() {
             price = std::bit_cast<Price>(priceRaw);
             Quantity quantity = be64toh(quantityRaw);
 
-            OrderRequest req{side, orderType, timeInForce, price, quantity};
+            Request::NewOrder newOrderReq{side, orderType, timeInForce, price,
+                                          quantity};
             m_sessions[currFd].addActiveRequest();
 
             // push the request onto the spsc queue
-            m_ctx.incomingRequests.push(req);
+            m_ctx.incomingRequests.push(newOrderReq);
           } else {
             // invalid message type (maybe supported in the future)
             write(currFd, &ResponseStatus::INVALID_MESSAGE_TYPE, 1);

@@ -1,2 +1,2 @@
 #pragma once
-enum class MessageType { ORDER = 0 };
+enum class MessageType { NEW_ORDER = 0, CANCEL_ORDER = 1, MODIFY_ORDER = 2 };
