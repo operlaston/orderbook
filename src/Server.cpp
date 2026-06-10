@@ -193,7 +193,9 @@ void Server::run() {
             m_sessions[currFd].addActiveRequest();
 
             // push the request onto the spsc queue
-            m_ctx.incomingRequests.push(newOrderReq);
+            // TODO: maybe look into exponential backoff or something?
+            while (!m_ctx.incomingRequests.push(newOrderReq))
+              ;
           } else {
             // invalid message type (maybe supported in the future)
             write(currFd, &ResponseStatus::INVALID_MESSAGE_TYPE, 1);

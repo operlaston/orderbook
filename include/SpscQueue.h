@@ -36,6 +36,7 @@ public:
 
     m_buffer[currWritePtr] = item;
     m_writePtr.store(nextWritePtr, std::memory_order_release);
+    return true;
   }
 
   std::optional<T> pop() {
