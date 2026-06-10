@@ -10,6 +10,8 @@ const uint8_t SERVER_ERROR = 3;
 } // namespace ResponseStatus
 
 namespace GlobalLengths {
-const uint8_t ORDER_MESSAGE = 19;
+const uint8_t NEW_ORDER_MESSAGE = 19;
+const uint8_t CANCEL_ORDER_MESSAGE = 8;
+const uint8_t MODIFY_ORDER_MESSAGE = 16;
 const uint32_t SPSC_QUEUE = 65536;
 } // namespace GlobalLengths

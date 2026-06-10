@@ -7,6 +7,7 @@
 
 namespace Request {
 struct NewOrder {
+  int sessionId;
   Side side;
   OrderType orderType;
   TimeInForce timeInForce;
@@ -15,10 +16,12 @@ struct NewOrder {
 };
 
 struct CancelOrder {
+  int sessionId;
   OrderId orderId;
 };
 
 struct ModifyOrder {
+  int sessionId;
   OrderId orderId;
   Quantity newQuantity;
 };

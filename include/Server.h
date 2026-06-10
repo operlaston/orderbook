@@ -18,6 +18,9 @@ private:
   void removeSession(int fd);
   void acceptClient();
   void markSessionClosed(int fd);
+  bool handleNewOrder(int currFd);
+  bool handleCancelOrder(int currFd);
+  bool handleModifyOrder(int currFd);
   // void readMessageComponent(int fd, void *msgComponentPtr,
   //                           size_t componentSize);
 

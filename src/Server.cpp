@@ -119,6 +119,101 @@ void Server::acceptClient() {
   assert(didEmplace);
 }
 
+// return false means error occurred or bad request
+bool Server::handleNewOrder(int currFd) {
+  // 1 byte Side, 1 byte OrderType, 1 byte TimeInForce, 8 byte Price,
+  // 8 byte Quantity
+  Side side;
+  OrderType orderType;
+  TimeInForce timeInForce;
+  uint64_t priceRaw;
+  uint64_t quantityRaw;
+
+  std::array<uint8_t, GlobalLengths::NEW_ORDER_MESSAGE> buf;
+  int bytesRead = read(currFd, buf.data(), buf.size());
+  if (bytesRead == 0) {
+    markSessionClosed(currFd);
+    write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    return false;
+  } else if (bytesRead != buf.size()) {
+    write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    return false;
+  }
+  side = static_cast<Side>(buf[0]);
+  orderType = static_cast<OrderType>(buf[1]);
+  timeInForce = static_cast<TimeInForce>(buf[2]);
+  std::memcpy(&priceRaw, &buf[3], sizeof(Price));
+  std::memcpy(&quantityRaw, &buf[11], sizeof(Quantity));
+
+  priceRaw = be64toh(priceRaw);
+  Price price = std::bit_cast<Price>(priceRaw);
+  Quantity quantity = be64toh(quantityRaw);
+
+  Request::NewOrder newOrderReq{currFd,      side,  orderType,
+                                timeInForce, price, quantity};
+  m_sessions[currFd].addActiveRequest();
+
+  // push the request onto the spsc queue
+  // TODO: maybe look into exponential backoff or something?
+  while (!m_ctx.incomingRequests.push(newOrderReq))
+    ;
+
+  return true;
+}
+
+bool Server::handleCancelOrder(int currFd) {
+  OrderId orderId;
+  int bytesRead = read(currFd, &orderId, sizeof(OrderId));
+  if (bytesRead == 0) {
+    markSessionClosed(currFd);
+    write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    return false;
+  } else if (bytesRead != sizeof(OrderId)) {
+    write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    return false;
+  }
+  orderId = be64toh(orderId);
+
+  Request::CancelOrder cancelOrderReq{currFd, orderId};
+  m_sessions[currFd].addActiveRequest();
+
+  // push the request onto the spsc queue
+  // TODO: maybe look into exponential backoff or something?
+  while (!m_ctx.incomingRequests.push(cancelOrderReq))
+    ;
+  return true;
+}
+
+bool Server::handleModifyOrder(int currFd) {
+  OrderId orderId;
+  Quantity newQuantity;
+  std::array<uint8_t, GlobalLengths::MODIFY_ORDER_MESSAGE> buf;
+  int bytesRead = read(currFd, buf.data(), buf.size());
+  if (bytesRead == 0) {
+    markSessionClosed(currFd);
+    write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    return false;
+  } else if (bytesRead != buf.size()) {
+    write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    return false;
+  }
+
+  std::memcpy(&orderId, &buf[0], sizeof(OrderId));
+  std::memcpy(&newQuantity, &buf[8], sizeof(Quantity));
+
+  orderId = be64toh(orderId);
+  newQuantity = be64toh(newQuantity);
+
+  Request::ModifyOrder modifyOrderReq{currFd, orderId, newQuantity};
+  m_sessions[currFd].addActiveRequest();
+
+  // push the request onto the spsc queue
+  // TODO: maybe look into exponential backoff or something?
+  while (!m_ctx.incomingRequests.push(modifyOrderReq))
+    ;
+  return true;
+}
+
 void Server::run() {
   std::array<struct epoll_event, SOMAXCONN> revents;
 
@@ -160,42 +255,17 @@ void Server::run() {
           MessageType messageType = static_cast<MessageType>(messageTypeRaw);
 
           if (messageType == MessageType::NEW_ORDER) {
-            // 1 byte Side, 1 byte OrderType, 1 byte TimeInForce, 8 byte Price,
-            // 8 byte Quantity
-            Side side;
-            OrderType orderType;
-            TimeInForce timeInForce;
-            uint64_t priceRaw;
-            uint64_t quantityRaw;
-
-            std::array<uint8_t, GlobalLengths::ORDER_MESSAGE> buf;
-            bytesRead = read(currFd, buf.data(), buf.size());
-            if (bytesRead == 0) {
-              markSessionClosed(currFd);
-              write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+            if (!handleNewOrder(currFd))
               break;
-            } else if (bytesRead != buf.size()) {
-              write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+
+          } else if (messageType == MessageType::CANCEL_ORDER) {
+            if (!handleCancelOrder(currFd))
               break;
-            }
-            side = static_cast<Side>(buf[0]);
-            orderType = static_cast<OrderType>(buf[1]);
-            timeInForce = static_cast<TimeInForce>(buf[2]);
-            std::memcpy(&priceRaw, &buf[3], sizeof(Price));
-            std::memcpy(&quantityRaw, &buf[11], sizeof(Quantity));
 
-            Price price = be64toh(priceRaw);
-            price = std::bit_cast<Price>(priceRaw);
-            Quantity quantity = be64toh(quantityRaw);
+          } else if (messageType == MessageType::MODIFY_ORDER) {
+            if (!handleModifyOrder(currFd))
+              break;
 
-            Request::NewOrder newOrderReq{side, orderType, timeInForce, price,
-                                          quantity};
-            m_sessions[currFd].addActiveRequest();
-
-            // push the request onto the spsc queue
-            // TODO: maybe look into exponential backoff or something?
-            while (!m_ctx.incomingRequests.push(newOrderReq))
-              ;
           } else {
             // invalid message type (maybe supported in the future)
             write(currFd, &ResponseStatus::INVALID_MESSAGE_TYPE, 1);
