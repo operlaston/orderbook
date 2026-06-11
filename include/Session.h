@@ -10,7 +10,7 @@ private:
   bool m_closed = false;
 
 public:
-  Session(int socketFd) : m_socket(socketFd) {}
+  explicit Session(int socketFd) : m_socket(socketFd) {}
   Session(const Session &other) = delete;
   Session &operator=(const Session &other) = delete;
   Session(Session &&other) noexcept {

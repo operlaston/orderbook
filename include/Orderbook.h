@@ -23,7 +23,7 @@ private:
 
 public:
   // Orderbook();
-  Orderbook(ServerEngineContext &ctx);
+  explicit Orderbook(ServerEngineContext &ctx);
   void addOrder(Side side, Price price, Quantity quantity,
                 OrderType orderType = OrderType::LIMIT,
                 TimeInForce timeInForce = TimeInForce::GOOD_TILL_CANCEL);
