@@ -7,6 +7,8 @@ const uint8_t SUCCESS = 0;
 const uint8_t BAD_REQUEST = 1;
 const uint8_t INVALID_MESSAGE_TYPE = 2;
 const uint8_t SERVER_ERROR = 3;
+const uint8_t PARTIAL_FILL = 4;
+const uint8_t CANT_FILL = 5;
 } // namespace ResponseStatus
 
 namespace GlobalLengths {

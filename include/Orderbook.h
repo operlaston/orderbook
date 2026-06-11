@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ResponseTypes.h"
 #include <Order.h>
 #include <ServerEngineContext.h>
 #include <Trade.h>
@@ -20,15 +21,17 @@ private:
   ServerEngineContext &m_ctx;
   Quantity matchOrder(const Order &incomingOrder);
   bool canFill(const Order &incomingOrder);
+  bool removeOrder(OrderId orderId);
 
 public:
   // Orderbook();
   explicit Orderbook(ServerEngineContext &ctx);
-  void addOrder(Side side, Price price, Quantity quantity,
-                OrderType orderType = OrderType::LIMIT,
+  void addOrder(Response::NewOrder &res, Side side, Price price,
+                Quantity quantity, OrderType orderType = OrderType::LIMIT,
                 TimeInForce timeInForce = TimeInForce::GOOD_TILL_CANCEL);
-  void removeOrder(OrderId orderId);
-  void modifyOrder(OrderId orderId, Quantity newQuantity);
+  void cancelOrder(Response::CancelOrder &res, OrderId orderId);
+  void modifyOrder(Response::ModifyOrder &res, OrderId orderId,
+                   Quantity newQuantity);
   void printOrderbook();
   void printTrades();
   void run();

@@ -1,7 +1,10 @@
+#include "GlobalConsts.h"
 #include "RequestTypes.h"
+#include "ResponseTypes.h"
 #include <Orderbook.h>
 #include <ServerEngineContext.h>
 #include <chrono>
+#include <cstdint>
 #include <iostream>
 #include <optional>
 #include <variant>
@@ -143,22 +146,28 @@ bool Orderbook::canFill(const Order &incomingOrder) {
   return quantity == 0;
 }
 
-void Orderbook::addOrder(Side side, Price price, Quantity quantity,
-                         OrderType orderType, TimeInForce timeInForce) {
+void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
+                         Quantity quantity, OrderType orderType,
+                         TimeInForce timeInForce) {
 
   if (side != Side::SELL && side != Side::BUY) {
+    res.status = ResponseStatus::BAD_REQUEST;
     return;
   }
 
   if (orderType == OrderType::MARKET) {
     timeInForce = TimeInForce::IMMEDIATE_OR_CANCEL;
     if (side == Side::BUY) {
-      if (m_asks.empty())
+      if (m_asks.empty()) {
+        res.status = ResponseStatus::CANT_FILL;
         return;
+      }
       price = std::prev(m_asks.end())->first;
     } else {
-      if (m_bids.empty())
+      if (m_bids.empty()) {
+        res.status = ResponseStatus::CANT_FILL;
         return;
+      }
       price = std::prev(m_bids.end())->first;
     }
   }
@@ -167,6 +176,7 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity,
     std::cout << "Error while adding order. Price and quantity must be "
                  "positive."
               << std::endl;
+    res.status = ResponseStatus::BAD_REQUEST;
     return;
   }
 
@@ -181,6 +191,13 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity,
   // or fill or kill
   if (timeInForce == TimeInForce::IMMEDIATE_OR_CANCEL ||
       timeInForce == TimeInForce::FILL_OR_KILL) {
+    if (quantity == remainingQuantity) {
+      res.status = ResponseStatus::CANT_FILL;
+    } else if (remainingQuantity > 0) {
+      res.status = ResponseStatus::PARTIAL_FILL;
+    } else {
+      res.status = ResponseStatus::SUCCESS;
+    }
     return;
   }
 
@@ -190,10 +207,6 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity,
       PriceLevel &priceLevel = m_bids[price];
       priceLevel.push_back(order);
       m_activeOrders[m_currId] = std::prev(priceLevel.end());
-      // auto it = priceLevel.emplace(priceLevel.end(), m_currId, side, price,
-      //                              remainingQuantity, timestamp, orderType,
-      //                              timeInForce);
-      // m_activeOrders[m_currId] = it;
     }
 
   } else if (side == Side::SELL) {
@@ -202,22 +215,20 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity,
       PriceLevel &priceLevel = m_asks[price];
       priceLevel.push_back(order);
       m_activeOrders[m_currId] = std::prev(priceLevel.end());
-      // auto it = priceLevel.emplace(priceLevel.end(), m_currId, side, price,
-      //                              remainingQuantity, timestamp, orderType,
-      //                              timeInForce);
-      // m_activeOrders[m_currId] = it;
     }
   }
 
+  res.status = ResponseStatus::SUCCESS;
+  res.newOrderId = m_currId;
   m_currId++;
 }
 
-void Orderbook::removeOrder(OrderId orderId) {
+bool Orderbook::removeOrder(OrderId orderId) {
   if (!m_activeOrders.contains(orderId)) {
     // order does not exist
     std::cout << "Error while cancelling order.\norderId: " << orderId
               << " doesn't exist" << std::endl;
-    return;
+    return false;
   }
 
   // remove the order from its queue and the activeOrders map
@@ -237,13 +248,24 @@ void Orderbook::removeOrder(OrderId orderId) {
     }
   }
   m_activeOrders.erase(orderId);
+  return true;
 }
 
-void Orderbook::modifyOrder(OrderId orderId, Quantity newQuantity) {
+void Orderbook::cancelOrder(Response::CancelOrder &res, OrderId orderId) {
+  if (!removeOrder(orderId)) {
+    res.status = ResponseStatus::BAD_REQUEST;
+  } else {
+    res.status = ResponseStatus::SUCCESS;
+  }
+}
+
+void Orderbook::modifyOrder(Response::ModifyOrder &res, OrderId orderId,
+                            Quantity newQuantity) {
   if (!m_activeOrders.contains(orderId)) {
     // invalid orderId
     std::cout << "Error while modifying order.\norderId: " << orderId
               << " doesn't exist" << std::endl;
+    res.status = ResponseStatus::BAD_REQUEST;
     return;
   }
 
@@ -257,10 +279,12 @@ void Orderbook::modifyOrder(OrderId orderId, Quantity newQuantity) {
                  "than the old quantity "
                  "and must be a positive number"
               << std::endl;
+    res.status = ResponseStatus::BAD_REQUEST;
     return;
   }
 
   it->setQuantity(newQuantity);
+  res.status = ResponseStatus::SUCCESS;
 }
 
 void Orderbook::printOrderbook() {
@@ -292,13 +316,29 @@ void Orderbook::run() {
     std::optional<ClientRequest> req = m_ctx.incomingRequests.pop();
     if (req != std::nullopt) {
       std::visit(overload{[this](const Request::NewOrder &order) {
-                            addOrder(order.side, order.price, order.quantity);
+                            Response::NewOrder res{};
+                            res.sessionId = order.sessionId;
+                            addOrder(res, order.side, order.price,
+                                     order.quantity);
+                            m_ctx.outgoingResponses.push(res);
+                            uint8_t cntrStep = 1;
+                            write(m_ctx.eventFd, &cntrStep, 1);
                           },
                           [this](const Request::CancelOrder &order) {
-                            removeOrder(order.orderId);
+                            Response::CancelOrder res{};
+                            res.sessionId = order.sessionId;
+                            cancelOrder(res, order.orderId);
+                            m_ctx.outgoingResponses.push(res);
+                            uint8_t cntrStep = 1;
+                            write(m_ctx.eventFd, &cntrStep, 1);
                           },
                           [this](const Request::ModifyOrder &order) {
-                            modifyOrder(order.orderId, order.newQuantity);
+                            Response::ModifyOrder res{};
+                            res.sessionId = order.sessionId;
+                            modifyOrder(res, order.orderId, order.newQuantity);
+                            m_ctx.outgoingResponses.push(res);
+                            uint8_t cntrStep = 1;
+                            write(m_ctx.eventFd, &cntrStep, 1);
                           }},
                  *req);
     }
