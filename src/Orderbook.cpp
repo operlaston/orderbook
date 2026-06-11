@@ -291,24 +291,16 @@ void Orderbook::run() {
   while (true) {
     std::optional<ClientRequest> req = m_ctx.incomingRequests.pop();
     if (req != std::nullopt) {
-      switch (req->index()) {
-        // didn't feel like making an enum or consts for this
-      case 0: {
-        Request::NewOrder order = std::get<0>(*req);
-        addOrder(order.side, order.price, order.quantity);
-        break;
-      }
-      case 1: {
-        Request::CancelOrder order = std::get<1>(*req);
-        removeOrder(order.orderId);
-        break;
-      }
-      case 2: {
-        Request::ModifyOrder order = std::get<2>(*req);
-        modifyOrder(order.orderId, order.newQuantity);
-        break;
-      }
-      }
+      std::visit(overload{[this](const Request::NewOrder &order) {
+                            addOrder(order.side, order.price, order.quantity);
+                          },
+                          [this](const Request::CancelOrder &order) {
+                            removeOrder(order.orderId);
+                          },
+                          [this](const Request::ModifyOrder &order) {
+                            modifyOrder(order.orderId, order.newQuantity);
+                          }},
+                 *req);
     }
   }
 }

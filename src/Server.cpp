@@ -2,11 +2,12 @@
 #include <MessageType.h>
 #include <OrderType.h>
 #include <RequestTypes.h>
+#include <ResponseTypes.h>
 #include <Server.h>
 #include <ServerEngineContext.h>
 #include <Side.h>
 #include <TimeInForce.h>
-#include <Using.h>
+#include <Utils.h>
 #include <array>
 #include <bit>
 #include <cassert>
@@ -17,11 +18,13 @@
 #include <fcntl.h>
 #include <iostream>
 #include <netinet/in.h>
+#include <optional>
 #include <stdexcept>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <system_error>
 #include <unistd.h>
+#include <variant>
 
 // Server::Server(uint16_t port) { initFds(port); }
 
@@ -214,6 +217,34 @@ bool Server::handleModifyOrder(int currFd) {
   return true;
 }
 
+void Server::sendResponse(const ServerResponse &resVariant) {
+  int sessionId =
+      std::visit([](const auto &res) { return res.sessionId; }, resVariant);
+  Session &session = m_sessions[sessionId];
+
+  std::visit(overload{[](const Response::NewOrder &res) {
+                        std::array<uint8_t, 9> buf;
+                        buf[0] = res.status;
+                        OrderId netNewOrderId = htobe64(res.newOrderId);
+                        std::memcpy(&buf[1], &netNewOrderId, 8);
+
+                        // TODO: handle write error
+                        write(res.sessionId, buf.data(), buf.size());
+                      },
+                      [](const Response::CancelOrder &res) {
+                        write(res.sessionId, &res.status, 1);
+                      },
+                      [](const Response::ModifyOrder &res) {
+                        write(res.sessionId, &res.status, 1);
+                      }},
+             resVariant);
+  session.removeActiveRequest();
+  assert(session.getActiveRequests() >= 0);
+  if (session.isMarkedClosed() && session.getActiveRequests() == 0) {
+    removeSession(sessionId);
+  }
+}
+
 void Server::run() {
   std::array<struct epoll_event, SOMAXCONN> revents;
 
@@ -231,6 +262,15 @@ void Server::run() {
         acceptClient();
       } else if (currFd == m_ctx.eventFd) {
         // read responses and forward them back to proper client
+        uint8_t resetEventFd;
+        int err = read(m_ctx.eventFd, &resetEventFd, 1);
+        if (err == -1) {
+          throw std::runtime_error("Failed to read from event fd");
+        }
+        std::optional<ServerResponse> res;
+        while ((res = m_ctx.outgoingResponses.pop()) != std::nullopt) {
+          sendResponse(*res);
+        }
       } else {
         // handle all messages currently in the buffer
         while (true) {

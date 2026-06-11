@@ -1,4 +1,5 @@
 #pragma once
+#include "ResponseTypes.h"
 #include "ServerEngineContext.h"
 #include <Session.h>
 #include <cstdint>
@@ -21,8 +22,7 @@ private:
   bool handleNewOrder(int currFd);
   bool handleCancelOrder(int currFd);
   bool handleModifyOrder(int currFd);
-  // void readMessageComponent(int fd, void *msgComponentPtr,
-  //                           size_t componentSize);
+  void sendResponse(const ServerResponse &res);
 
 public:
   // Server(uint16_t port = 8080);

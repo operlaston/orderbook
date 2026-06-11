@@ -3,7 +3,7 @@
 #include <OrderType.h>
 #include <Side.h>
 #include <TimeInForce.h>
-#include <Using.h>
+#include <Utils.h>
 
 namespace Request {
 struct NewOrder {
