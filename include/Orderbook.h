@@ -27,8 +27,8 @@ public:
   // Orderbook();
   explicit Orderbook(ServerEngineContext &ctx);
   void addOrder(Response::NewOrder &res, Side side, Price price,
-                Quantity quantity, OrderType orderType = OrderType::LIMIT,
-                TimeInForce timeInForce = TimeInForce::GOOD_TILL_CANCEL);
+                Quantity quantity, OrderType orderType,
+                TimeInForce timeInForce);
   void cancelOrder(Response::CancelOrder &res, OrderId orderId);
   void modifyOrder(Response::ModifyOrder &res, OrderId orderId,
                    Quantity newQuantity);

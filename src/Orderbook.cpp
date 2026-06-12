@@ -21,9 +21,6 @@ Quantity Orderbook::matchOrder(const Order &incomingOrder) {
   Quantity quantity = incomingOrder.getQuantity();
   Timestamp timestamp = incomingOrder.getTimestamp();
 
-  if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL) {
-    std::cout << "\nFILL OR KILL ORDERED" << std::endl;
-  }
   if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL &&
       !canFill(incomingOrder)) {
     return quantity;
@@ -153,6 +150,14 @@ bool Orderbook::canFill(const Order &incomingOrder) {
 void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
                          Quantity quantity, OrderType orderType,
                          TimeInForce timeInForce) {
+
+  // std::cout << "\n<==============ADDING NEW ORDER==================>\n"
+  //           << "Side: " << static_cast<int>(side)
+  //           << "\nPrice: " << static_cast<int>(price)
+  //           << "\nQuantity: " << quantity
+  //           << "\nOrderType: " << static_cast<int>(orderType)
+  //           << "\nTimeInForce: " << static_cast<int>(timeInForce) <<
+  //           std::endl;
 
   if (side != Side::SELL && side != Side::BUY) {
     res.status = ResponseStatus::BAD_REQUEST;
@@ -322,7 +327,8 @@ void Orderbook::run() {
                             Response::NewOrder res{};
                             res.sessionId = order.sessionId;
                             addOrder(res, order.side, order.price,
-                                     order.quantity);
+                                     order.quantity, order.orderType,
+                                     order.timeInForce);
                             m_ctx.outgoingResponses.push(res);
                             uint64_t cntrStep = 1;
                             write(m_ctx.eventFd, &cntrStep, 8);
