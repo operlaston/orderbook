@@ -89,8 +89,8 @@ void Server::removeFdEpoll(int fd) {
 
 void Server::removeSession(int fd) {
   std::cout << "\nremoving session" << std::endl;
-  m_sessions.erase(fd);
   removeFdEpoll(fd);
+  m_sessions.erase(fd);
 }
 
 void Server::markSessionClosed(int fd) { m_sessions.at(fd).markClosed(); }
@@ -120,7 +120,7 @@ void Server::acceptClient() {
 }
 
 void Server::writeSafely(int fd, const void *buf, size_t n) {
-  int err = write(fd, buf, n);
+  int err = send(fd, buf, n, MSG_NOSIGNAL);
   if (err < 0) {
     removeSession(fd);
   }
@@ -224,6 +224,9 @@ bool Server::handleModifyOrder(int currFd) {
 void Server::sendResponse(const ServerResponse &resVariant) {
   int sessionId =
       std::visit([](const auto &res) { return res.sessionId; }, resVariant);
+  if (!m_sessions.contains(sessionId)) {
+    return;
+  }
   Session &session = m_sessions.at(sessionId);
 
   std::visit(overload{[this](const Response::NewOrder &res) {
@@ -240,8 +243,6 @@ void Server::sendResponse(const ServerResponse &resVariant) {
                         writeSafely(res.sessionId, &res.status, 1);
                       }},
              resVariant);
-  std::cout << "session " << sessionId << " now has "
-            << session.getActiveRequests() << " active requests " << std::endl;
   if (m_sessions.contains(sessionId)) {
     session.removeActiveRequest();
     assert(session.getActiveRequests() >= 0);
@@ -296,6 +297,7 @@ void Server::run() {
               break;
             } else { // unknown error occurred, remove the session
               removeSession(currFd);
+              break;
             }
           }
 

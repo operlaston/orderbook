@@ -33,8 +33,6 @@ void requestNewOrder(Side side, OrderType orderType, TimeInForce timeInForce,
 
 int main() {
   struct sockaddr_in serv_addr;
-  const char *message = "Hello from the C++ client!";
-  char buffer[1024] = {0};
 
   if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
     std::cerr << "Error: Socket creation failed." << std::endl;
@@ -73,6 +71,7 @@ int main() {
   requestNewOrder(Side::BUY, OrderType::LIMIT, TimeInForce::FILL_OR_KILL, 102,
                   300);
 
+  // sleep(1000);
   close(sock);
 
   return 0;
