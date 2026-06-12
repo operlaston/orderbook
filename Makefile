@@ -1,5 +1,5 @@
 CC=g++
-CCFLAGS=-std=c++20 -Wall -Wextra -Wno-interference-size -g
+CCFLAGS=-std=c++20 -Wall -Wextra -Wno-interference-size -O2 -g
 INCLUDES=-I./include
 
 all: build/orderbook build/client
