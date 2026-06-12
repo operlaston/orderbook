@@ -89,7 +89,7 @@ void Server::removeFdEpoll(int fd) {
 
 void Server::removeSession(int fd) {
   if (m_sessions.contains(fd)) {
-    std::cout << "\nremoving session" << std::endl;
+    // std::cout << "\nremoving session" << std::endl;
     removeFdEpoll(fd);
     m_sessions.erase(fd);
   }
