@@ -5,6 +5,7 @@
 #include <ServerEngineContext.h>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <iostream>
 #include <optional>
 #include <variant>
@@ -20,6 +21,9 @@ Quantity Orderbook::matchOrder(const Order &incomingOrder) {
   Quantity quantity = incomingOrder.getQuantity();
   Timestamp timestamp = incomingOrder.getTimestamp();
 
+  if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL) {
+    std::cout << "\nFILL OR KILL ORDERED" << std::endl;
+  }
   if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL &&
       !canFill(incomingOrder)) {
     return quantity;
@@ -288,15 +292,14 @@ void Orderbook::modifyOrder(Response::ModifyOrder &res, OrderId orderId,
 }
 
 void Orderbook::printOrderbook() {
-  std::cout << "\nOrderbook State" << std::endl;
-  std::cout << "\nAsks: " << std::endl;
+  std::cout << "\n|==========Asks==========|" << std::endl;
   for (const auto &[priceLevel, orders] : m_asks) {
     for (const auto &order : orders) {
       order.display();
     }
   }
 
-  std::cout << "\nBids: " << std::endl;
+  std::cout << "\n|==========Bids==========|" << std::endl;
   for (const auto &[priceLevel, orders] : m_bids) {
     for (const auto &order : orders) {
       order.display();
@@ -305,7 +308,7 @@ void Orderbook::printOrderbook() {
 }
 
 void Orderbook::printTrades() {
-  std::cout << "\nCurrent Trades" << std::endl;
+  std::cout << "\n|==========Trades==========|" << std::endl;
   for (const auto &trade : m_trades) {
     trade.display();
   }
@@ -321,26 +324,28 @@ void Orderbook::run() {
                             addOrder(res, order.side, order.price,
                                      order.quantity);
                             m_ctx.outgoingResponses.push(res);
-                            uint8_t cntrStep = 1;
-                            write(m_ctx.eventFd, &cntrStep, 1);
+                            uint64_t cntrStep = 1;
+                            write(m_ctx.eventFd, &cntrStep, 8);
                           },
                           [this](const Request::CancelOrder &order) {
                             Response::CancelOrder res{};
                             res.sessionId = order.sessionId;
                             cancelOrder(res, order.orderId);
                             m_ctx.outgoingResponses.push(res);
-                            uint8_t cntrStep = 1;
-                            write(m_ctx.eventFd, &cntrStep, 1);
+                            uint64_t cntrStep = 1;
+                            write(m_ctx.eventFd, &cntrStep, 8);
                           },
                           [this](const Request::ModifyOrder &order) {
                             Response::ModifyOrder res{};
                             res.sessionId = order.sessionId;
                             modifyOrder(res, order.orderId, order.newQuantity);
                             m_ctx.outgoingResponses.push(res);
-                            uint8_t cntrStep = 1;
-                            write(m_ctx.eventFd, &cntrStep, 1);
+                            uint64_t cntrStep = 1;
+                            write(m_ctx.eventFd, &cntrStep, 8);
                           }},
                  *req);
+      // printOrderbook();
+      // printTrades();
     }
   }
 }

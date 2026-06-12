@@ -3,19 +3,25 @@
 #include <Server.h>
 #include <ServerEngineContext.h>
 #include <TimeInForce.h>
+#include <functional>
+#include <thread>
+
+void runEngine(ServerEngineContext &ctx) {
+  Orderbook orderbook{ctx};
+  orderbook.run();
+}
+
+void runServer(ServerEngineContext &ctx) {
+  Server server{ctx};
+  server.run();
+}
 
 int main() {
   ServerEngineContext ctx;
-  Orderbook orderbook{ctx};
-  Server server{ctx};
-  orderbook.addOrder(Side::SELL, 103.57, 200);
-  orderbook.addOrder(Side::SELL, 101.04, 70);
-  orderbook.addOrder(Side::SELL, 101.04, 60);
-  orderbook.addOrder(Side::BUY, 100.56, 50);
-  orderbook.addOrder(Side::BUY, 99.28, 50);
-  orderbook.addOrder(Side::BUY, 102, 300, OrderType::LIMIT,
-                     TimeInForce::FILL_OR_KILL);
-  orderbook.printOrderbook();
-  orderbook.printTrades();
+  std::thread matchingEngine(runEngine, std::ref(ctx));
+  std::thread server(runServer, std::ref(ctx));
+
+  matchingEngine.join();
+  server.join();
   return 0;
 }

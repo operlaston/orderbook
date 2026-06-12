@@ -13,7 +13,6 @@ private:
   int m_socket = -1;
   int m_epollFd = -1;
 
-  void initFds(uint16_t port);
   void addFdEpoll(int fd);
   void removeFdEpoll(int fd);
   void removeSession(int fd);
@@ -23,6 +22,7 @@ private:
   bool handleCancelOrder(int currFd);
   bool handleModifyOrder(int currFd);
   void sendResponse(const ServerResponse &res);
+  void writeSafely(int fd, const void *buf, size_t n);
 
 public:
   // Server(uint16_t port = 8080);

@@ -16,8 +16,8 @@ struct ServerEngineContext {
   ServerEngineContext() {
     eventFd = eventfd(0, EFD_NONBLOCK);
     if (eventFd == -1) {
-      std::system_error(errno, std::generic_category(),
-                        "Failed to create eventFd");
+      throw std::system_error(errno, std::generic_category(),
+                              "Failed to create eventFd");
     }
   }
   // no copying (nor moving)

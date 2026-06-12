@@ -13,6 +13,7 @@
 #include <cassert>
 #include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <endian.h>
 #include <fcntl.h>
@@ -29,10 +30,6 @@
 // Server::Server(uint16_t port) { initFds(port); }
 
 Server::Server(ServerEngineContext &ctx, uint16_t port) : m_ctx(ctx) {
-  initFds(port);
-}
-
-void Server::initFds(uint16_t port) {
   // initialize epoll fd
   m_epollFd = ::epoll_create1(0);
   if (m_epollFd == -1) {
@@ -53,15 +50,14 @@ void Server::initFds(uint16_t port) {
 
   if (::bind(m_socket, (sockaddr *)&serverAddr, sizeof(serverAddr)) == -1) {
     throw std::runtime_error("Failed to bind socket");
-    return;
   }
 
   if (::listen(m_socket, SOMAXCONN) == -1) {
     throw std::runtime_error("Failed to listen on socket");
-    return;
   }
 
   addFdEpoll(m_socket);
+  addFdEpoll(m_ctx.eventFd);
   std::cout << "Server started on port " << port << std::endl;
 }
 
@@ -92,11 +88,12 @@ void Server::removeFdEpoll(int fd) {
 }
 
 void Server::removeSession(int fd) {
+  std::cout << "\nremoving session" << std::endl;
   m_sessions.erase(fd);
   removeFdEpoll(fd);
 }
 
-void Server::markSessionClosed(int fd) { m_sessions[fd].markClosed(); }
+void Server::markSessionClosed(int fd) { m_sessions.at(fd).markClosed(); }
 
 void Server::acceptClient() {
   int clientSocket = -1;
@@ -122,6 +119,13 @@ void Server::acceptClient() {
   assert(didEmplace);
 }
 
+void Server::writeSafely(int fd, const void *buf, size_t n) {
+  int err = write(fd, buf, n);
+  if (err < 0) {
+    removeSession(fd);
+  }
+}
+
 // return false means error occurred or bad request
 bool Server::handleNewOrder(int currFd) {
   // 1 byte Side, 1 byte OrderType, 1 byte TimeInForce, 8 byte Price,
@@ -136,10 +140,10 @@ bool Server::handleNewOrder(int currFd) {
   int bytesRead = read(currFd, buf.data(), buf.size());
   if (bytesRead == 0) {
     markSessionClosed(currFd);
-    write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
     return false;
-  } else if (bytesRead != buf.size()) {
-    write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+  } else if (bytesRead != static_cast<int>(buf.size())) {
+    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
     return false;
   }
   side = static_cast<Side>(buf[0]);
@@ -154,7 +158,7 @@ bool Server::handleNewOrder(int currFd) {
 
   Request::NewOrder newOrderReq{currFd,      side,  orderType,
                                 timeInForce, price, quantity};
-  m_sessions[currFd].addActiveRequest();
+  m_sessions.at(currFd).addActiveRequest();
 
   // push the request onto the spsc queue
   // TODO: maybe look into exponential backoff or something?
@@ -169,16 +173,16 @@ bool Server::handleCancelOrder(int currFd) {
   int bytesRead = read(currFd, &orderId, sizeof(OrderId));
   if (bytesRead == 0) {
     markSessionClosed(currFd);
-    write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
     return false;
   } else if (bytesRead != sizeof(OrderId)) {
-    write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
     return false;
   }
   orderId = be64toh(orderId);
 
   Request::CancelOrder cancelOrderReq{currFd, orderId};
-  m_sessions[currFd].addActiveRequest();
+  m_sessions.at(currFd).addActiveRequest();
 
   // push the request onto the spsc queue
   // TODO: maybe look into exponential backoff or something?
@@ -194,10 +198,10 @@ bool Server::handleModifyOrder(int currFd) {
   int bytesRead = read(currFd, buf.data(), buf.size());
   if (bytesRead == 0) {
     markSessionClosed(currFd);
-    write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
     return false;
-  } else if (bytesRead != buf.size()) {
-    write(currFd, &ResponseStatus::BAD_REQUEST, 1);
+  } else if (bytesRead != static_cast<int>(buf.size())) {
+    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
     return false;
   }
 
@@ -208,7 +212,7 @@ bool Server::handleModifyOrder(int currFd) {
   newQuantity = be64toh(newQuantity);
 
   Request::ModifyOrder modifyOrderReq{currFd, orderId, newQuantity};
-  m_sessions[currFd].addActiveRequest();
+  m_sessions.at(currFd).addActiveRequest();
 
   // push the request onto the spsc queue
   // TODO: maybe look into exponential backoff or something?
@@ -220,28 +224,30 @@ bool Server::handleModifyOrder(int currFd) {
 void Server::sendResponse(const ServerResponse &resVariant) {
   int sessionId =
       std::visit([](const auto &res) { return res.sessionId; }, resVariant);
-  Session &session = m_sessions[sessionId];
+  Session &session = m_sessions.at(sessionId);
 
-  std::visit(overload{[](const Response::NewOrder &res) {
+  std::visit(overload{[this](const Response::NewOrder &res) {
                         std::array<uint8_t, 9> buf;
                         buf[0] = res.status;
                         OrderId netNewOrderId = htobe64(res.newOrderId);
                         std::memcpy(&buf[1], &netNewOrderId, 8);
-
-                        // TODO: handle write error
-                        write(res.sessionId, buf.data(), buf.size());
+                        writeSafely(res.sessionId, buf.data(), buf.size());
                       },
-                      [](const Response::CancelOrder &res) {
-                        write(res.sessionId, &res.status, 1);
+                      [this](const Response::CancelOrder &res) {
+                        writeSafely(res.sessionId, &res.status, 1);
                       },
-                      [](const Response::ModifyOrder &res) {
-                        write(res.sessionId, &res.status, 1);
+                      [this](const Response::ModifyOrder &res) {
+                        writeSafely(res.sessionId, &res.status, 1);
                       }},
              resVariant);
-  session.removeActiveRequest();
-  assert(session.getActiveRequests() >= 0);
-  if (session.isMarkedClosed() && session.getActiveRequests() == 0) {
-    removeSession(sessionId);
+  std::cout << "session " << sessionId << " now has "
+            << session.getActiveRequests() << " active requests " << std::endl;
+  if (m_sessions.contains(sessionId)) {
+    session.removeActiveRequest();
+    assert(session.getActiveRequests() >= 0);
+    if (session.isMarkedClosed() && session.getActiveRequests() == 0) {
+      removeSession(sessionId);
+    }
   }
 }
 
@@ -262,9 +268,10 @@ void Server::run() {
         acceptClient();
       } else if (currFd == m_ctx.eventFd) {
         // read responses and forward them back to proper client
-        uint8_t resetEventFd;
-        int err = read(m_ctx.eventFd, &resetEventFd, 1);
+        uint64_t resetEventFd;
+        int err = read(m_ctx.eventFd, &resetEventFd, 8);
         if (err == -1) {
+          ::perror("eventfd read");
           throw std::runtime_error("Failed to read from event fd");
         }
         std::optional<ServerResponse> res;
@@ -280,7 +287,7 @@ void Server::run() {
             markSessionClosed(currFd);
             // if not processing any active requests from this client
             // remove the session object from the session map
-            if (m_sessions[currFd].getActiveRequests() == 0) {
+            if (m_sessions.at(currFd).getActiveRequests() == 0) {
               removeSession(currFd);
             }
             break;
@@ -308,7 +315,7 @@ void Server::run() {
 
           } else {
             // invalid message type (maybe supported in the future)
-            write(currFd, &ResponseStatus::INVALID_MESSAGE_TYPE, 1);
+            writeSafely(currFd, &ResponseStatus::INVALID_MESSAGE_TYPE, 1);
             break;
           }
         }
