@@ -1,3 +1,4 @@
+#include "GlobalConsts.h"
 #include <MessageType.h>
 #include <OrderType.h>
 #include <Side.h>
@@ -7,6 +8,7 @@
 #include <array>
 #include <bit>
 #include <cstring>
+#include <endian.h>
 #include <iostream>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -14,8 +16,32 @@
 
 int sock = -1;
 
-void requestNewOrder(Side side, OrderType orderType, TimeInForce timeInForce,
-                     Price price, Quantity quantity) {
+void printStatus(uint8_t status) {
+  switch (status) {
+  case ResponseStatus::SUCCESS:
+    std::cout << "SUCCESS" << std::endl;
+    break;
+  case ResponseStatus::BAD_REQUEST:
+    std::cout << "BAD REQUEST" << std::endl;
+    break;
+  case ResponseStatus::INVALID_MESSAGE_TYPE:
+    std::cout << "INVALID MESSAGE TYPE" << std::endl;
+    break;
+  case ResponseStatus::SERVER_ERROR:
+    std::cout << "SERVER ERROR" << std::endl;
+    break;
+  case ResponseStatus::PARTIAL_FILL:
+    std::cout << "PARTIALLY FILLED ORDER" << std::endl;
+    break;
+  case ResponseStatus::CANT_FILL:
+    std::cout << "CANT FILL ORDER" << std::endl;
+    break;
+  }
+}
+
+OrderId requestNewOrder(Side side, OrderType orderType, TimeInForce timeInForce,
+                        Price price, Quantity quantity) {
+  std::cout << "New Order" << std::endl;
   std::array<uint8_t, 20> buf;
   buf[0] = static_cast<uint8_t>(MessageType::NEW_ORDER);
   buf[1] = static_cast<uint8_t>(side);
@@ -28,7 +54,58 @@ void requestNewOrder(Side side, OrderType orderType, TimeInForce timeInForce,
 
   std::memcpy(&buf[4], &priceRaw, 8);
   std::memcpy(&buf[12], &quantityRaw, 8);
-  ::write(sock, buf.data(), 20);
+  ::write(sock, buf.data(), buf.size());
+
+  // get response
+  std::array<uint8_t, 9> responseBuf;
+  ::read(sock, responseBuf.data(), responseBuf.size());
+
+  printStatus(responseBuf[0]);
+
+  uint64_t newOrderIdRaw;
+  memcpy(&newOrderIdRaw, &responseBuf[1], 8);
+  OrderId newOrderId = be64toh(newOrderIdRaw);
+  std::cout << "New Order ID is " << newOrderId << std::endl;
+  return newOrderId;
+}
+
+OrderId requestMarketOrder(Side side, Quantity quantity) {
+  return requestNewOrder(side, OrderType::MARKET, TimeInForce::NONE, 0,
+                         quantity);
+}
+
+OrderId requestLimitOrder(Side side, TimeInForce timeInForce, Price price,
+                          Quantity quantity) {
+  return requestNewOrder(side, OrderType::LIMIT, timeInForce, price, quantity);
+}
+
+void requestCancelOrder(OrderId orderId) {
+  std::cout << "Cancel Order " << orderId << std::endl;
+  std::array<uint8_t, 9> buf;
+  buf[0] = static_cast<uint8_t>(MessageType::CANCEL_ORDER);
+  uint64_t orderIdRaw = htobe64(orderId);
+  memcpy(&buf[1], &orderIdRaw, 8);
+  ::write(sock, buf.data(), buf.size());
+
+  uint8_t res;
+  ::read(sock, &res, 1);
+  printStatus(res);
+}
+
+void requestModifyOrder(OrderId orderId, Quantity newQuantity) {
+  std::cout << "Modify Order " << orderId << ". Attempt to change quantity to "
+            << newQuantity << std::endl;
+  std::array<uint8_t, 17> buf;
+  buf[0] = static_cast<uint8_t>(MessageType::MODIFY_ORDER);
+  uint64_t orderIdRaw = htobe64(orderId);
+  uint64_t newQuantityRaw = htobe64(newQuantity);
+  memcpy(&buf[1], &orderIdRaw, 8);
+  memcpy(&buf[9], &newQuantityRaw, 8);
+  ::write(sock, buf.data(), buf.size());
+
+  uint8_t res;
+  ::read(sock, &res, 1);
+  printStatus(res);
 }
 
 int main() {
@@ -58,18 +135,18 @@ int main() {
   std::vector<uint8_t> buf = {
       0,
   };
-  requestNewOrder(Side::SELL, OrderType::LIMIT, TimeInForce::GOOD_TILL_CANCEL,
-                  103.57, 200);
-  requestNewOrder(Side::SELL, OrderType::LIMIT, TimeInForce::GOOD_TILL_CANCEL,
-                  101.04, 70);
-  requestNewOrder(Side::SELL, OrderType::LIMIT, TimeInForce::GOOD_TILL_CANCEL,
-                  101.04, 60);
-  requestNewOrder(Side::BUY, OrderType::LIMIT, TimeInForce::GOOD_TILL_CANCEL,
-                  100.56, 50);
-  requestNewOrder(Side::BUY, OrderType::LIMIT, TimeInForce::GOOD_TILL_CANCEL,
-                  99.28, 50);
-  requestNewOrder(Side::BUY, OrderType::LIMIT, TimeInForce::FILL_OR_KILL, 102,
-                  300);
+  requestLimitOrder(Side::SELL, TimeInForce::GOOD_TILL_CANCEL, 103.57, 200);
+  requestLimitOrder(Side::SELL, TimeInForce::GOOD_TILL_CANCEL, 101.04, 70);
+  requestLimitOrder(Side::SELL, TimeInForce::GOOD_TILL_CANCEL, 101.04, 60);
+  OrderId someCancelledId =
+      requestLimitOrder(Side::BUY, TimeInForce::GOOD_TILL_CANCEL, 100.56, 50);
+  OrderId someModifiedId =
+      requestLimitOrder(Side::BUY, TimeInForce::GOOD_TILL_CANCEL, 99.28, 50);
+  requestMarketOrder(Side::BUY, 500);
+
+  requestCancelOrder(someCancelledId);
+
+  requestModifyOrder(someModifiedId, 30);
 
   // sleep(1000);
   close(sock);

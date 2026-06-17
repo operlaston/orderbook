@@ -83,7 +83,7 @@ Outgoing messages represent the system's acknowledgement and result of the incom
 | Field | Size (Bytes) | Description |
 | :--- | :--- | :--- |
 | `Status` | 1 | The outcome of the new order request |
-| `OrderId` | 8 | The generated unique identifier assigned to the new order |
+| `OrderId` | 8 | The generated unique identifier assigned to the new order. Note that a returned id of 0 means that the order was either filled immediately or cancelled immediately (by either FOK or IOC) |
 
 #### Cancel Order Response
 **Total Size: 1 byte**
