@@ -17,9 +17,7 @@ private:
   std::map<Price, std::list<Order>> m_asks;
   std::unordered_map<OrderId, std::list<Order>::iterator> m_activeOrders;
   std::vector<Trade> m_trades;
-  // let an ID of 0 represent that the order was not given an order id
-  // as it was either filled immediately or cancelled immediately
-  OrderId m_currId = 1;
+  OrderId m_currId = 0;
   ServerEngineContext &m_ctx;
   Quantity matchOrder(const Order &incomingOrder);
   bool canFill(const Order &incomingOrder);

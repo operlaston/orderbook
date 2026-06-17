@@ -159,6 +159,8 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
   //           << "\nTimeInForce: " << static_cast<int>(timeInForce) <<
   //           std::endl;
 
+  m_currId++;
+
   if (side != Side::SELL && side != Side::BUY) {
     res.status = ResponseStatus::BAD_REQUEST;
     return;
@@ -229,7 +231,6 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
 
   res.status = ResponseStatus::SUCCESS;
   res.newOrderId = m_currId;
-  m_currId++;
 }
 
 bool Orderbook::removeOrder(OrderId orderId) {
