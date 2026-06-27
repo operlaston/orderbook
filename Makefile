@@ -16,8 +16,8 @@ build/server.o: src/Server.cpp $(wildcard include/*.h)
 build/main.o: src/main.cpp $(wildcard include/*.h)
 	$(CC) $(CCFLAGS) $(INCLUDES) -c src/main.cpp -o build/main.o
 
-build/client: src/Client.cpp $(wildcard include/*.h)
-	$(CC) $(CCFLAGS) $(INCLUDES) -o build/client src/Client.cpp
+build/client: src/client/Client.cpp $(wildcard include/*.h)
+	$(CC) $(CCFLAGS) $(INCLUDES) -o build/client src/client/Client.cpp
 
 clean:
 	rm -rf build/*

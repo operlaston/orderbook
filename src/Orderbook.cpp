@@ -134,7 +134,7 @@ bool Orderbook::canFill(const Order &incomingOrder) {
         currPriceListIter++;
         if (currPriceListIter == currPriceList->end()) {
           currPriceLevel++;
-          if (currPriceLevel == m_asks.end()) {
+          if (currPriceLevel == m_bids.end()) {
             break;
           }
           currPriceList = &currPriceLevel->second;

@@ -10,13 +10,14 @@
 #include <cstring>
 #include <endian.h>
 #include <iostream>
+#include <limits>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <vector>
 
 int sock = -1;
 
 void printStatus(uint8_t status) {
+  std::cout << std::endl;
   switch (status) {
   case ResponseStatus::SUCCESS:
     std::cout << "SUCCESS" << std::endl;
@@ -41,7 +42,6 @@ void printStatus(uint8_t status) {
 
 OrderId requestNewOrder(Side side, OrderType orderType, TimeInForce timeInForce,
                         Price price, Quantity quantity) {
-  std::cout << "New Order" << std::endl;
   std::array<uint8_t, 20> buf;
   buf[0] = static_cast<uint8_t>(MessageType::NEW_ORDER);
   buf[1] = static_cast<uint8_t>(side);
@@ -108,6 +108,23 @@ void requestModifyOrder(OrderId orderId, Quantity newQuantity) {
   printStatus(res);
 }
 
+int parseOption(int low, int high) {
+  int actionOption = 0;
+  if (!(std::cin >> actionOption)) {
+    std::cout << "Please enter a valid number from " << low << "-" << high
+              << std::endl;
+    std::cin.clear();
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max());
+    return -1;
+  } else if (actionOption < low || actionOption > high) {
+    std::cout << "Please enter a valid number from " << low << "-" << high
+              << std::endl;
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max());
+    return -1;
+  }
+  return actionOption;
+}
+
 int main() {
   struct sockaddr_in serv_addr;
 
@@ -132,23 +149,95 @@ int main() {
 
   std::cout << "Connected to server on port 8080" << std::endl;
 
-  std::vector<uint8_t> buf = {
-      0,
-  };
-  requestLimitOrder(Side::SELL, TimeInForce::GOOD_TILL_CANCEL, 103.57, 200);
-  requestLimitOrder(Side::SELL, TimeInForce::GOOD_TILL_CANCEL, 101.04, 70);
-  requestLimitOrder(Side::SELL, TimeInForce::GOOD_TILL_CANCEL, 101.04, 60);
-  OrderId someCancelledId =
-      requestLimitOrder(Side::BUY, TimeInForce::GOOD_TILL_CANCEL, 100.56, 50);
-  OrderId someModifiedId =
-      requestLimitOrder(Side::BUY, TimeInForce::GOOD_TILL_CANCEL, 99.28, 50);
-  requestMarketOrder(Side::BUY, 500);
+  while (true) {
+    std::string actionsText = "=======Actions=======\n"
+                              "(1) New Order\n"
+                              "(2) Cancel Order\n"
+                              "(3) Modify Order\n";
 
-  requestCancelOrder(someCancelledId);
+    std::cout << actionsText << std::endl;
 
-  requestModifyOrder(someModifiedId, 30);
+    int actionOption = parseOption(1, 3);
 
-  // sleep(1000);
+    if (actionOption == 1) { // New Order
+      std::string sidePrompt = "\n=======Side=======\n"
+                               "(1) Buy\n"
+                               "(2) Sell\n";
+      std::string orderTypePrompt = "\n=======Order Type=======\n"
+                                    "(1) Limit\n"
+                                    "(2) Market\n";
+      std::string timeInForcePrompt = "\n=======Time In Force=======\n"
+                                      "(1) None\n"
+                                      "(2) Good Til Cancel\n"
+                                      "(3) Immediate Or Cancel\n"
+                                      "(4) Fill Or Kill\n";
+      std::string pricePrompt = "\nPrice: ";
+      std::string quantityPrompt = "\nQuantity: ";
+
+      std::cout << sidePrompt << std::endl;
+      int sideRaw = parseOption(1, 2);
+      sideRaw--;
+      Side side = static_cast<Side>(sideRaw);
+
+      std::cout << quantityPrompt;
+      Quantity quantity = 0;
+      std::cin >> quantity;
+
+      std::cout << orderTypePrompt << std::endl;
+      int orderTypeRaw = parseOption(1, 2);
+      orderTypeRaw--;
+      OrderType orderType = static_cast<OrderType>(orderTypeRaw);
+
+      if (orderType == OrderType::MARKET) {
+        requestMarketOrder(side, quantity);
+        continue;
+      }
+
+      std::cout << pricePrompt;
+      Price price = 0;
+      std::cin >> price;
+
+      std::cout << timeInForcePrompt << std::endl;
+      int timeInForceRaw = parseOption(1, 4);
+      timeInForceRaw--;
+      TimeInForce timeInForce = static_cast<TimeInForce>(timeInForceRaw);
+
+      requestLimitOrder(side, timeInForce, price, quantity);
+
+    } else if (actionOption == 2) { // Cancel Order
+      OrderId orderId = 0;
+      std::cout << "\nOrder Id: ";
+      if (!(std::cin >> orderId)) {
+        std::cout << "Please enter a valid unsigned 64 bit integer"
+                  << std::endl;
+        std::cin.clear();
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max());
+        return -1;
+      }
+      requestCancelOrder(orderId);
+    } else { // Modify Order
+      OrderId orderId = 0;
+      std::cout << "\nOrder Id: ";
+      if (!(std::cin >> orderId)) {
+        std::cout << "Please enter a valid unsigned 64 bit integer"
+                  << std::endl;
+        std::cin.clear();
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max());
+        return -1;
+      }
+      Quantity quantity = 0;
+      std::cout << "\nNew Quantity: ";
+      if (!(std::cin >> quantity)) {
+        std::cout << "Please enter a valid unsigned 64 bit integer"
+                  << std::endl;
+        std::cin.clear();
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max());
+        return -1;
+      }
+      requestModifyOrder(orderId, quantity);
+    }
+  }
+
   close(sock);
 
   return 0;

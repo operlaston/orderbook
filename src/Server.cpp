@@ -9,6 +9,7 @@
 #include <TimeInForce.h>
 #include <Utils.h>
 #include <array>
+#include <asm-generic/socket.h>
 #include <bit>
 #include <cassert>
 #include <cerrno>
@@ -48,7 +49,12 @@ Server::Server(ServerEngineContext &ctx, uint16_t port) : m_ctx(ctx) {
   serverAddr.sin_addr.s_addr = INADDR_ANY;
   serverAddr.sin_port = htons(port);
 
+  int opt = 1;
+  setsockopt(m_socket, SOL_SOCKET, SO_REUSEPORT | SO_REUSEADDR, &opt,
+             sizeof(opt));
+
   if (::bind(m_socket, (sockaddr *)&serverAddr, sizeof(serverAddr)) == -1) {
+    perror("bind");
     throw std::runtime_error("Failed to bind socket");
   }
 
