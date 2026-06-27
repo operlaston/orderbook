@@ -10,6 +10,16 @@ The engine runs on its own dedicated thread and is responsible for matching orde
 ## Server
 The server is also run on its own dedicated thread. It handles all the network I/O. It uses epoll to implement an async event loop. For each client, an instance of a Session is created (which manages the underlying file descriptor and closes it upon destruction). Upon receiving a request, it forwards it to the matching engine so it can move on to parse other requests while the engine works on fulfilling the request. Once the matching engine wants to send a response, it will make the response available via the outbound spsc queue and write to an event file descriptor (created using eventfd), which is in the server's epoll interest list. This allows the server to be made aware that a response is ready to be sent back to a client.
 
+## Client
+This project also includes a very basic client command line application to interact with the server which I mostly used for testing.
+
+## Build and Execution
+GNU make and gcc (that supports at least up to c++20) are required to build this application.
+<br>
+Run `make` from the project's root directory to build.
+<br>
+The orderbook and client binaries are available in the `build/` directory.
+
 # Communication Protocol
 This is a basic protocol I came up with on top of TCP.
 
