@@ -43,10 +43,10 @@ Quantity Orderbook::matchOrder(const Order &incomingOrder) {
         quantity = 0;
         break;
       } else {
-        removeOrder(lowestAskIt->getId());
-        quantity -= lowestAskQuantity;
         m_trades.emplace_back(m_currId, lowestAskIt->getId(), lowestAskPrice,
                               lowestAskQuantity, timestamp);
+        removeOrder(lowestAskIt->getId());
+        quantity -= lowestAskQuantity;
         if (m_asks.empty())
           break;
 
@@ -70,10 +70,10 @@ Quantity Orderbook::matchOrder(const Order &incomingOrder) {
         quantity = 0;
         break;
       } else {
-        removeOrder(highestBidIt->getId());
-        quantity -= highestBidQuantity;
         m_trades.emplace_back(m_currId, highestBidIt->getId(), highestBidPrice,
                               highestBidQuantity, timestamp);
+        removeOrder(highestBidIt->getId());
+        quantity -= highestBidQuantity;
 
         if (m_bids.empty())
           break;
