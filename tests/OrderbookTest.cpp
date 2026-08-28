@@ -80,10 +80,7 @@ TEST(OrderbookTest, LargeBidPartialFills) {
   Orderbook ob(ctx);
 
   Response::NewOrder sellRes{};
-  ob.addOrder(sellRes, Side::SELL, 100.0, 1, OrderType::LIMIT,
-              TimeInForce::GOOD_TILL_CANCEL);
-
-  ob.addOrder(sellRes, Side::SELL, 105.0, 1, OrderType::LIMIT,
+  ob.addOrder(sellRes, Side::SELL, 100.0, 2, OrderType::LIMIT,
               TimeInForce::GOOD_TILL_CANCEL);
 
   Response::NewOrder buyRes{};
@@ -91,6 +88,7 @@ TEST(OrderbookTest, LargeBidPartialFills) {
               TimeInForce::GOOD_TILL_CANCEL);
 
   EXPECT_EQ(buyRes.status, ResponseStatus::PARTIAL_FILL);
+  EXPECT_EQ(ob.getTrades().size(), 1u);
 
   EXPECT_EQ(ob.getAsks().size(), 0u);
 
