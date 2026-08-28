@@ -320,6 +320,22 @@ void Orderbook::printTrades() {
   }
 }
 
+namespace {
+void writeToServer(int eventFd) {
+  uint64_t inc = 1;
+  ssize_t n;
+  do {
+    n = ::write(eventFd, &inc, sizeof(inc));
+  } while (n < 0 && errno == EINTR);
+
+  // this should never happen
+  if (n != sizeof(inc)) {
+    ::perror("eventFd write");
+    std::abort();
+  }
+}
+} // namespace
+
 void Orderbook::run() {
   while (true) {
     std::optional<ClientRequest> req = m_ctx.incomingRequests.pop();
@@ -331,24 +347,21 @@ void Orderbook::run() {
                                      order.quantity, order.orderType,
                                      order.timeInForce);
                             m_ctx.outgoingResponses.push(res);
-                            uint64_t cntrStep = 1;
-                            write(m_ctx.eventFd, &cntrStep, 8);
+                            writeToServer(m_ctx.eventFd);
                           },
                           [this](const Request::CancelOrder &order) {
                             Response::CancelOrder res{};
                             res.sessionId = order.sessionId;
                             cancelOrder(res, order.orderId);
                             m_ctx.outgoingResponses.push(res);
-                            uint64_t cntrStep = 1;
-                            write(m_ctx.eventFd, &cntrStep, 8);
+                            writeToServer(m_ctx.eventFd);
                           },
                           [this](const Request::ModifyOrder &order) {
                             Response::ModifyOrder res{};
                             res.sessionId = order.sessionId;
                             modifyOrder(res, order.orderId, order.newQuantity);
                             m_ctx.outgoingResponses.push(res);
-                            uint64_t cntrStep = 1;
-                            write(m_ctx.eventFd, &cntrStep, 8);
+                            writeToServer(m_ctx.eventFd);
                           }},
                  *req);
       // printOrderbook();
