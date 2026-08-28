@@ -21,4 +21,8 @@ public:
               << "\nPrice: " << m_price << "\nQuantity: " << m_quantity
               << "\nTimestamp: " << m_timestamp << std::endl;
   }
+  OrderId getBidId() const { return m_bidId; }
+  OrderId getAskId() const { return m_askId; }
+  Price getPrice() const { return m_price; }
+  Quantity getQuantity() const { return m_quantity; }
 };

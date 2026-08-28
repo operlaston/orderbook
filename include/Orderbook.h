@@ -34,5 +34,6 @@ public:
                    Quantity newQuantity);
   void printOrderbook();
   void printTrades();
+  const std::vector<Trade> &getTrades() const { return m_trades; }
   void run();
 };

@@ -1,23 +1,29 @@
-CC=g++
-CCFLAGS=-std=c++20 -Wall -Wextra -Wno-interference-size -O2 -g
-INCLUDES=-I./include
+CXX := g++
+CXXFLAGS := -std=c++20 -Wall -Wextra -Wno-interference-size -O2 -g -MMD -MP -pthread
+LDFLAGS := -pthread
+INCLUDES := -I include
+BUILD := build
 
-all: build/orderbook build/client
+SERVER_SRCS := src/Orderbook.cpp src/Server.cpp src/main.cpp
+SERVER_OBJS := $(SERVER_SRCS:src/%.cpp=$(BUILD)/%.o)
 
-build/orderbook: build/orderbook.o build/server.o build/main.o $(wildcard include/*.h)
-	$(CC) $(CCFLAGS) $(INCLUDES) -o build/orderbook build/orderbook.o build/server.o build/main.o
+.PHONY: all clean
 
-build/orderbook.o: src/Orderbook.cpp $(wildcard include/*.h)
-	$(CC) $(CCFLAGS) $(INCLUDES) -c src/Orderbook.cpp -o build/orderbook.o
+all: $(BUILD)/orderbook $(BUILD)/client
 
-build/server.o: src/Server.cpp $(wildcard include/*.h)
-	$(CC) $(CCFLAGS) $(INCLUDES) -c src/Server.cpp -o build/server.o
+$(BUILD)/orderbook: $(SERVER_OBJS) | $(BUILD)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
-build/main.o: src/main.cpp $(wildcard include/*.h)
-	$(CC) $(CCFLAGS) $(INCLUDES) -c src/main.cpp -o build/main.o
+$(BUILD)/client: src/client/Client.cpp | $(BUILD)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@ $(LDFLAGS)
 
-build/client: src/client/Client.cpp $(wildcard include/*.h)
-	$(CC) $(CCFLAGS) $(INCLUDES) -o build/client src/client/Client.cpp
+$(BUILD)/%.o: src/%.cpp | $(BUILD)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BUILD):
+	mkdir -p $(BUILD)
 
 clean:
-	rm -rf build/*
+	rm -r $(BUILD)
+
+-include $(SERVER_OBJS:.o=.d) $(BUILD)/Client.d

@@ -30,7 +30,7 @@ Quantity Orderbook::matchOrder(const Order &incomingOrder) {
     auto lowestAskIt = m_asks.begin()->second.begin();
     Price lowestAskPrice = lowestAskIt->getPrice();
     // check the lowest ask
-    while (price >= lowestAskPrice) {
+    while (price >= lowestAskPrice && quantity > 0) {
 
       Quantity lowestAskQuantity = lowestAskIt->getQuantity();
 
@@ -58,19 +58,19 @@ Quantity Orderbook::matchOrder(const Order &incomingOrder) {
     auto highestBidIt = m_bids.begin()->second.begin();
     Price highestBidPrice = highestBidIt->getPrice();
     // check the highest bid
-    while (price <= highestBidPrice) {
+    while (price <= highestBidPrice && quantity > 0) {
       Quantity highestBidQuantity = highestBidIt->getQuantity();
 
       // fill the order and break out of loop if bid quantity does
       // not exceed lowest ask quantity
       if (highestBidQuantity > quantity) {
         highestBidIt->setQuantity(highestBidQuantity - quantity);
-        m_trades.emplace_back(m_currId, highestBidIt->getId(), highestBidPrice,
+        m_trades.emplace_back(highestBidIt->getId(), m_currId, highestBidPrice,
                               quantity, timestamp);
         quantity = 0;
         break;
       } else {
-        m_trades.emplace_back(m_currId, highestBidIt->getId(), highestBidPrice,
+        m_trades.emplace_back(highestBidIt->getId(), m_currId, highestBidPrice,
                               highestBidQuantity, timestamp);
         removeOrder(highestBidIt->getId());
         quantity -= highestBidQuantity;
