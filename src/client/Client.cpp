@@ -16,6 +16,41 @@
 
 int sock = -1;
 
+void safeWrite(int fd, const void *buf, size_t n) {
+  ssize_t bytesWritten;
+  char *pos = (char *)buf;
+  do {
+    bytesWritten = write(fd, pos, n);
+    if (bytesWritten == -1) {
+      if (errno == EINTR)
+        continue;
+      else {
+        ::perror("write");
+        std::abort();
+      }
+    }
+    n -= bytesWritten;
+    pos += bytesWritten;
+  } while (n > 0);
+}
+
+void safeRead(int fd, void *buf, size_t n) {
+  ssize_t bytesRead;
+  do {
+    bytesRead = read(fd, buf, n);
+    if (bytesRead == -1) {
+      if (errno == EINTR)
+        continue;
+      else {
+        ::perror("read");
+        std::abort();
+      }
+    }
+    n -= bytesRead;
+    buf = (char *)buf + bytesRead;
+  } while (n > 0);
+}
+
 void printStatus(uint8_t status) {
   std::cout << std::endl;
   switch (status) {
@@ -54,11 +89,11 @@ OrderId requestNewOrder(Side side, OrderType orderType, TimeInForce timeInForce,
 
   std::memcpy(&buf[4], &priceRaw, 8);
   std::memcpy(&buf[12], &quantityRaw, 8);
-  ::write(sock, buf.data(), buf.size());
+  safeWrite(sock, buf.data(), buf.size());
 
   // get response
   std::array<uint8_t, 9> responseBuf;
-  ::read(sock, responseBuf.data(), responseBuf.size());
+  safeRead(sock, responseBuf.data(), responseBuf.size());
 
   printStatus(responseBuf[0]);
 
@@ -85,10 +120,10 @@ void requestCancelOrder(OrderId orderId) {
   buf[0] = static_cast<uint8_t>(MessageType::CANCEL_ORDER);
   uint64_t orderIdRaw = htobe64(orderId);
   memcpy(&buf[1], &orderIdRaw, 8);
-  ::write(sock, buf.data(), buf.size());
+  safeWrite(sock, buf.data(), buf.size());
 
   uint8_t res;
-  ::read(sock, &res, 1);
+  safeRead(sock, &res, 1);
   printStatus(res);
 }
 
@@ -101,10 +136,10 @@ void requestModifyOrder(OrderId orderId, Quantity newQuantity) {
   uint64_t newQuantityRaw = htobe64(newQuantity);
   memcpy(&buf[1], &orderIdRaw, 8);
   memcpy(&buf[9], &newQuantityRaw, 8);
-  ::write(sock, buf.data(), buf.size());
+  safeWrite(sock, buf.data(), buf.size());
 
   uint8_t res;
-  ::read(sock, &res, 1);
+  safeRead(sock, &res, 1);
   printStatus(res);
 }
 
