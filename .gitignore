@@ -1,5 +1,5 @@
 compile_commands.json
 orderbook
-build/client
+build/
 .clang-format
 *.o
