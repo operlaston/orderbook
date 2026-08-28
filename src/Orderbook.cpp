@@ -212,6 +212,15 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
     return;
   }
 
+  if (remainingQuantity > 0 && quantity != remainingQuantity) {
+    res.status = ResponseStatus::PARTIAL_FILL;
+  } else {
+    res.status = ResponseStatus::SUCCESS;
+  }
+  // order is not fok or ioc so we change the quantity to
+  // what remains
+  order.setQuantity(remainingQuantity);
+
   if (side == Side::BUY) {
 
     if (remainingQuantity > 0) {
@@ -229,7 +238,6 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
     }
   }
 
-  res.status = ResponseStatus::SUCCESS;
   res.newOrderId = m_currId;
 }
 

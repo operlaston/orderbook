@@ -1,5 +1,6 @@
 CXX := g++
 CXXFLAGS := -std=c++20 -Wall -Wextra -Wno-interference-size -O2 -g -MMD -MP -pthread
+GTEST_LIBS := -lgtest -lgtest_main -pthread
 LDFLAGS := -pthread
 INCLUDES := -I include
 BUILD := build
@@ -7,23 +8,45 @@ BUILD := build
 SERVER_SRCS := src/Orderbook.cpp src/Server.cpp src/main.cpp
 SERVER_OBJS := $(SERVER_SRCS:src/%.cpp=$(BUILD)/%.o)
 
-.PHONY: all clean
+# Production objects reused by the tests (everything except main.o)
+LIB_OBJS := $(BUILD)/Orderbook.o
+
+TEST_SRCS := $(wildcard tests/*.cpp)
+TEST_OBJS := $(TEST_SRCS:tests/%.cpp=$(BUILD)/tests/%.o)
+
+.PHONY: all clean test
 
 all: $(BUILD)/orderbook $(BUILD)/client
+
+# orderbook
 
 $(BUILD)/orderbook: $(SERVER_OBJS) | $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
+$(BUILD)/%.o: src/%.cpp | $(BUILD)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# client
 $(BUILD)/client: src/client/Client.cpp | $(BUILD)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@ $(LDFLAGS)
 
-$(BUILD)/%.o: src/%.cpp | $(BUILD)
+# tests
+test: $(BUILD)/run_tests
+	./$(BUILD)/run_tests
+
+$(BUILD)/run_tests: $(TEST_OBJS) $(LIB_OBJS) | $(BUILD)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(GTEST_LIBS)
+
+$(BUILD)/tests/%.o: tests/%.cpp | $(BUILD)/tests
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
+$(BUILD)/tests: | $(BUILD)
+	mkdir -p $(BUILD)/tests
+
 clean:
 	rm -r $(BUILD)
 
--include $(SERVER_OBJS:.o=.d) $(BUILD)/Client.d
+-include $(SERVER_OBJS:.o=.d) $(BUILD)/Client.d $(TEST_OBJS:.o=.d)
