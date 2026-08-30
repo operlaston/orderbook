@@ -26,6 +26,16 @@ protected:
                 TimeInForce::GOOD_TILL_CANCEL);
   }
 
+  void marketBid(Quantity quantity) {
+    ob.addOrder(lastRes, Side::BUY, 0, quantity, OrderType::MARKET,
+                TimeInForce::NONE);
+  }
+
+  void marketAsk(Quantity quantity) {
+    ob.addOrder(lastRes, Side::SELL, 0, quantity, OrderType::MARKET,
+                TimeInForce::NONE);
+  }
+
   Order getTopBid() { return *ob.getBids().begin()->second.begin(); }
   Order getTopAsk() { return *ob.getAsks().begin()->second.begin(); }
   Trade getLastTrade() { return ob.getTrades().back(); }
@@ -113,4 +123,36 @@ TEST_F(OrderbookTest, LargeAskPartialFills) {
   Order topAsk = getTopAsk();
   EXPECT_DOUBLE_EQ(topAsk.getPrice(), 100.0);
   EXPECT_EQ(topAsk.getQuantity(), 1u);
+}
+//
+// TEST_F(OrderbookTest, FullFillBidPricePriorityRespected) {
+//   limitAskGtc(105.0, 1);
+//   limitAskGtc(100.0, 1);
+//   limitAskGtc(102.0, 2);
+//   limitBidGtc(110.0, 2);
+//
+//   // should fill 100 for quantity 1 and 102 for quantity 1
+//   EXPECT_EQ(lastRes.status, ResponseStatus::SUCCESS);
+//   ASSERT_EQ(ob.getTrades().size(), 2u);
+//   EXPECT_EQ(ob.getTrades()[1].getPrice(), 102.0);
+//   EXPECT_EQ(ob.getTrades()[0].getPrice(), 100.0);
+//   EXPECT_EQ(ob.getTrades()[1].getQuantity(), 1u);
+//   EXPECT_EQ(ob.getTrades()[0].getPrice(), 1u);
+//   EXPECT_TRUE(ob.getBids().empty());
+//   ASSERT_EQ(ob.getAsks().size(), 2u);
+//   EXPECT_EQ(getTopAsk().getPrice(), 102.0);
+//   EXPECT_EQ(getTopAsk().getQuantity(), 1u);
+// }
+
+TEST_F(OrderbookTest, MarketOrderBidFilled) {
+  limitAskGtc(105.0, 1);
+  limitAskGtc(100.0, 1);
+  marketBid(1);
+  ASSERT_EQ(ob.getAsks().size(), 1u);
+  Order topAsk = getTopAsk();
+  EXPECT_DOUBLE_EQ(topAsk.getPrice(), 105.0);
+  EXPECT_EQ(topAsk.getQuantity(), 1u);
+  EXPECT_EQ(ob.getTrades().size(), 1u);
+  EXPECT_DOUBLE_EQ(ob.getTrades().front().getPrice(), 100.0);
+  EXPECT_EQ(ob.getTrades().front().getQuantity(), 1u);
 }
