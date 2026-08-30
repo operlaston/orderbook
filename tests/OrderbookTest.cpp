@@ -49,8 +49,7 @@ TEST_F(OrderbookTest, AsksCanBePlaced) {
   EXPECT_EQ(topAsk.getQuantity(), 10u);
 }
 
-TEST_F(OrderbookTest, CrossingLimitOrdersProduceATrade) {
-
+TEST_F(OrderbookTest, IncomingAskMatchedToBid) {
   limitBidGtc(100.0, 10);
   limitAskGtc(100.0, 10);
 
@@ -59,6 +58,17 @@ TEST_F(OrderbookTest, CrossingLimitOrdersProduceATrade) {
   EXPECT_EQ(getLastTrade().getQuantity(), 10u);
   EXPECT_EQ(getLastTrade().getBidId(), 1u);
   EXPECT_EQ(getLastTrade().getAskId(), 2u);
+}
+
+TEST_F(OrderbookTest, IncomingBidMatchedToAsk) {
+  limitAskGtc(100.0, 10);
+  limitBidGtc(100.0, 10);
+
+  ASSERT_EQ(ob.getTrades().size(), 1u);
+  EXPECT_DOUBLE_EQ(getLastTrade().getPrice(), 100.0);
+  EXPECT_EQ(getLastTrade().getQuantity(), 10u);
+  EXPECT_EQ(getLastTrade().getAskId(), 1u);
+  EXPECT_EQ(getLastTrade().getBidId(), 2u);
 }
 
 TEST_F(OrderbookTest, LimitOrderWithNoMatchesRests) {
@@ -90,4 +100,17 @@ TEST_F(OrderbookTest, LargeBidPartialFills) {
   Order topBid = getTopBid();
   EXPECT_DOUBLE_EQ(topBid.getPrice(), 105.0);
   EXPECT_EQ(topBid.getQuantity(), 1u);
+}
+
+TEST_F(OrderbookTest, LargeAskPartialFills) {
+  limitBidGtc(105.0, 2);
+  limitAskGtc(100.0, 3);
+
+  EXPECT_EQ(lastRes.status, ResponseStatus::PARTIAL_FILL);
+  EXPECT_EQ(ob.getTrades().size(), 1u);
+  EXPECT_EQ(ob.getBids().size(), 0u);
+  ASSERT_EQ(ob.getAsks().size(), 1u);
+  Order topAsk = getTopAsk();
+  EXPECT_DOUBLE_EQ(topAsk.getPrice(), 100.0);
+  EXPECT_EQ(topAsk.getQuantity(), 1u);
 }
