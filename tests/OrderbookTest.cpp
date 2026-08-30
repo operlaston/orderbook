@@ -7,93 +7,87 @@
 #include "Side.h"
 #include "TimeInForce.h"
 
-TEST(OrderbookTest, BidsAndAsksCanBePlaced) {
+class OrderbookTest : public testing::Test {
+protected:
   ServerEngineContext ctx;
-  Orderbook ob(ctx);
+  Orderbook ob;
+  Response::NewOrder lastRes{};
 
-  Response::NewOrder buyRes{};
-  ob.addOrder(buyRes, Side::BUY, 100.0, 10, OrderType::LIMIT,
-              TimeInForce::GOOD_TILL_CANCEL);
+  OrderbookTest() : ob(ctx) {}
+  ~OrderbookTest() override = default;
 
-  ASSERT_EQ(buyRes.status, ResponseStatus::SUCCESS);
+  void limitBidGtc(Price price, Quantity quantity) {
+    ob.addOrder(lastRes, Side::BUY, price, quantity, OrderType::LIMIT,
+                TimeInForce::GOOD_TILL_CANCEL);
+  }
+
+  void limitAskGtc(Price price, Quantity quantity) {
+    ob.addOrder(lastRes, Side::SELL, price, quantity, OrderType::LIMIT,
+                TimeInForce::GOOD_TILL_CANCEL);
+  }
+
+  Order getTopBid() { return *ob.getBids().begin()->second.begin(); }
+  Order getTopAsk() { return *ob.getAsks().begin()->second.begin(); }
+  Trade getLastTrade() { return ob.getTrades().back(); }
+};
+
+TEST_F(OrderbookTest, BidsCanBePlaced) {
+  limitBidGtc(100.0, 10);
+  ASSERT_EQ(lastRes.status, ResponseStatus::SUCCESS);
   ASSERT_EQ(ob.getBids().size(), 1u);
-  auto restingBid = ob.getBids().begin()->second.begin();
-  EXPECT_DOUBLE_EQ(restingBid->getPrice(), 100.0);
-  EXPECT_EQ(restingBid->getQuantity(), 10u);
-
-  Response::NewOrder sellRes{};
-  ob.addOrder(sellRes, Side::SELL, 200.0, 10, OrderType::LIMIT,
-              TimeInForce::GOOD_TILL_CANCEL);
-  ASSERT_EQ(sellRes.status, ResponseStatus::SUCCESS);
-  ASSERT_EQ(ob.getAsks().size(), 1u);
-  auto restingAsk = ob.getAsks().begin()->second.begin();
-  EXPECT_DOUBLE_EQ(restingAsk->getPrice(), 200.0);
-  EXPECT_EQ(restingAsk->getQuantity(), 10u);
+  Order topBid = getTopBid();
+  EXPECT_DOUBLE_EQ(topBid.getPrice(), 100.0);
+  EXPECT_EQ(topBid.getQuantity(), 10u);
 }
 
-TEST(OrderbookTest, CrossingLimitOrdersProduceATrade) {
-  ServerEngineContext ctx;
-  Orderbook ob(ctx);
+TEST_F(OrderbookTest, AsksCanBePlaced) {
+  limitAskGtc(100.0, 10);
+  ASSERT_EQ(lastRes.status, ResponseStatus::SUCCESS);
+  ASSERT_EQ(ob.getAsks().size(), 1u);
+  Order topAsk = getTopAsk();
+  EXPECT_DOUBLE_EQ(topAsk.getPrice(), 100.0);
+  EXPECT_EQ(topAsk.getQuantity(), 10u);
+}
 
-  Response::NewOrder buyRes{};
-  ob.addOrder(buyRes, Side::BUY, 100.0, 10, OrderType::LIMIT,
-              TimeInForce::GOOD_TILL_CANCEL);
+TEST_F(OrderbookTest, CrossingLimitOrdersProduceATrade) {
 
-  Response::NewOrder sellRes{};
-  ob.addOrder(sellRes, Side::SELL, 100.0, 10, OrderType::LIMIT,
-              TimeInForce::GOOD_TILL_CANCEL);
+  limitBidGtc(100.0, 10);
+  limitAskGtc(100.0, 10);
 
   ASSERT_EQ(ob.getTrades().size(), 1u);
-  EXPECT_DOUBLE_EQ(ob.getTrades().front().getPrice(), 100.0);
-  EXPECT_EQ(ob.getTrades().front().getQuantity(), 10u);
-  EXPECT_EQ(ob.getTrades().front().getBidId(), 1u);
-  EXPECT_EQ(ob.getTrades().front().getAskId(), 2u);
+  EXPECT_DOUBLE_EQ(getLastTrade().getPrice(), 100.0);
+  EXPECT_EQ(getLastTrade().getQuantity(), 10u);
+  EXPECT_EQ(getLastTrade().getBidId(), 1u);
+  EXPECT_EQ(getLastTrade().getAskId(), 2u);
 }
 
-TEST(OrderbookTest, LimitOrderWithNoMatchesRests) {
-  ServerEngineContext ctx;
-  Orderbook ob(ctx);
+TEST_F(OrderbookTest, LimitOrderWithNoMatchesRests) {
 
-  Response::NewOrder buyRes{};
-  ob.addOrder(buyRes, Side::BUY, 100.0, 1, OrderType::LIMIT,
-              TimeInForce::GOOD_TILL_CANCEL);
-
-  Response::NewOrder sellRes{};
-  ob.addOrder(sellRes, Side::SELL, 101.0, 1, OrderType::LIMIT,
-              TimeInForce::GOOD_TILL_CANCEL);
+  limitBidGtc(100.0, 1);
+  limitAskGtc(101.0, 1);
 
   EXPECT_TRUE(ob.getTrades().empty());
 
   ASSERT_EQ(ob.getBids().size(), 1u);
-  auto restingBid = ob.getBids().begin();
-  EXPECT_DOUBLE_EQ(restingBid->first, 100.0);
-  EXPECT_DOUBLE_EQ((restingBid->second.begin())->getQuantity(), 1);
+  Order topBid = getTopBid();
+  EXPECT_DOUBLE_EQ(topBid.getPrice(), 100.0);
+  EXPECT_DOUBLE_EQ(topBid.getQuantity(), 1);
 
   ASSERT_EQ(ob.getAsks().size(), 1u);
-  auto restingAsk = ob.getAsks().begin();
-  EXPECT_DOUBLE_EQ(restingAsk->first, 101.0);
-  EXPECT_DOUBLE_EQ((restingAsk->second.begin())->getQuantity(), 1);
+  Order topAsk = getTopAsk();
+  EXPECT_DOUBLE_EQ(topAsk.getPrice(), 101.0);
+  EXPECT_DOUBLE_EQ(topAsk.getQuantity(), 1);
 }
 
-TEST(OrderbookTest, LargeBidPartialFills) {
-  ServerEngineContext ctx;
-  Orderbook ob(ctx);
+TEST_F(OrderbookTest, LargeBidPartialFills) {
+  limitAskGtc(100.0, 2);
+  limitBidGtc(105.0, 3);
 
-  Response::NewOrder sellRes{};
-  ob.addOrder(sellRes, Side::SELL, 100.0, 2, OrderType::LIMIT,
-              TimeInForce::GOOD_TILL_CANCEL);
-
-  Response::NewOrder buyRes{};
-  ob.addOrder(buyRes, Side::BUY, 105.0, 3, OrderType::LIMIT,
-              TimeInForce::GOOD_TILL_CANCEL);
-
-  EXPECT_EQ(buyRes.status, ResponseStatus::PARTIAL_FILL);
+  EXPECT_EQ(lastRes.status, ResponseStatus::PARTIAL_FILL);
   EXPECT_EQ(ob.getTrades().size(), 1u);
-
   EXPECT_EQ(ob.getAsks().size(), 0u);
-
   ASSERT_EQ(ob.getBids().size(), 1u);
-  auto restingBid = ob.getBids().begin();
-  EXPECT_DOUBLE_EQ(restingBid->first, 105.0);
-  EXPECT_EQ((restingBid->second.begin())->getQuantity(), 1u);
+  Order topBid = getTopBid();
+  EXPECT_DOUBLE_EQ(topBid.getPrice(), 105.0);
+  EXPECT_EQ(topBid.getQuantity(), 1u);
 }
