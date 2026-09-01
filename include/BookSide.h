@@ -7,6 +7,7 @@
 #include <iterator>
 #include <list>
 #include <map>
+#include <unordered_map>
 
 using PriceLevel = std::list<Order>;
 
@@ -84,10 +85,30 @@ public:
       return end();
     }
     OrderIter orderIt = levelIt->second.begin();
-    return Iterator(&m_orders, levelIt, orderIt);
+    return Iterator{&m_orders, levelIt, orderIt};
   }
 
   Iterator end() { return Iterator(&m_orders, m_orders.end(), OrderIter{}); }
+
+  Iterator insert(const Order &order,
+                  std::unordered_map<OrderId, OrderIter> &activeOrders) {
+    auto levelIt = m_orders.try_emplace(order.getPrice()).first;
+    levelIt->second.push_back(order);
+    auto orderIt = std::prev(levelIt->second.end());
+    activeOrders[order.getId()] = orderIt;
+    return Iterator{&m_orders, levelIt, orderIt};
+  }
+
+  void remove(OrderIter orderIt,
+              std::unordered_map<OrderId, OrderIter> &activeOrders) {
+    activeOrders.erase(orderIt->getId());
+    auto levelIt = m_orders.find(orderIt->getPrice());
+    assert(levelIt != m_orders.end());
+    levelIt->second.erase(orderIt);
+    if (levelIt->second.empty()) {
+      m_orders.erase(levelIt);
+    }
+  }
 
 private:
   Map m_orders;
