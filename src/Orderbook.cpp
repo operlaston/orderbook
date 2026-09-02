@@ -14,76 +14,55 @@
 
 Orderbook::Orderbook(ServerEngineContext &ctx) : m_ctx(ctx) {}
 
+// matches the incoming order against the resting/opposite-side book
+template <typename Compare>
+Quantity Orderbook::fillAgainst(BookSide<Compare> &restingBook,
+                                const Order &incomingOrder) {
+  // gives us std::less if restingBook is asks
+  // gives us std::greater if restingBook is bids
+  // we want price >= lowestAskPrice and price <= highestBidPrice
+  Compare reversePriceCmp{};
+  Price incomingPrice = incomingOrder.getPrice();
+  Quantity incomingQuantity = incomingOrder.getQuantity();
+
+  auto bookIt = restingBook.begin();
+  while (bookIt != restingBook.end() && incomingQuantity > 0 &&
+         !reversePriceCmp(incomingPrice, bookIt->getPrice())) {
+    Quantity restingQuantity = bookIt->getQuantity();
+    Quantity filledQuantity = std::min(incomingQuantity, restingQuantity);
+
+    incomingQuantity -= filledQuantity;
+
+    OrderId bidId =
+        (incomingOrder.getSide() == Side::BUY) ? m_currId : bookIt->getId();
+    OrderId askId =
+        (incomingOrder.getSide() == Side::BUY) ? bookIt->getId() : m_currId;
+
+    m_trades.emplace_back(bidId, askId, bookIt->getPrice(), filledQuantity,
+                          incomingOrder.getTimestamp());
+    if (filledQuantity == restingQuantity) {
+      bookIt = restingBook.erase(bookIt, m_activeOrders);
+    } else {
+      bookIt->setQuantity(restingQuantity - filledQuantity);
+    }
+  }
+
+  return incomingQuantity;
+}
+
 // returns the remaining quantity of the order
 Quantity Orderbook::matchOrder(const Order &incomingOrder) {
-  Side side = incomingOrder.getSide();
-  Price price = incomingOrder.getPrice();
-  Quantity quantity = incomingOrder.getQuantity();
-  Timestamp timestamp = incomingOrder.getTimestamp();
 
   if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL &&
       !canFill(incomingOrder)) {
-    return quantity;
+    return incomingOrder.getQuantity();
   }
 
-  if (side == Side::BUY && !m_asks.empty()) {
-    auto lowestAskIt = m_asks.begin()->second.begin();
-    Price lowestAskPrice = lowestAskIt->getPrice();
-    // check the lowest ask
-    while (price >= lowestAskPrice && quantity > 0) {
-
-      Quantity lowestAskQuantity = lowestAskIt->getQuantity();
-
-      // fill the order and break out of loop if bid quantity does
-      // not exceed lowest ask quantity
-      if (lowestAskQuantity > quantity) {
-        lowestAskIt->setQuantity(lowestAskQuantity - quantity);
-        m_trades.emplace_back(m_currId, lowestAskIt->getId(), lowestAskPrice,
-                              quantity, timestamp);
-        quantity = 0;
-        break;
-      } else {
-        m_trades.emplace_back(m_currId, lowestAskIt->getId(), lowestAskPrice,
-                              lowestAskQuantity, timestamp);
-        removeOrder(lowestAskIt->getId());
-        quantity -= lowestAskQuantity;
-        if (m_asks.empty())
-          break;
-
-        lowestAskIt = m_asks.begin()->second.begin();
-        lowestAskPrice = lowestAskIt->getPrice();
-      }
-    }
-  } else if (side == Side::SELL && !m_bids.empty()) {
-    auto highestBidIt = m_bids.begin()->second.begin();
-    Price highestBidPrice = highestBidIt->getPrice();
-    // check the highest bid
-    while (price <= highestBidPrice && quantity > 0) {
-      Quantity highestBidQuantity = highestBidIt->getQuantity();
-
-      // fill the order and break out of loop if bid quantity does
-      // not exceed lowest ask quantity
-      if (highestBidQuantity > quantity) {
-        highestBidIt->setQuantity(highestBidQuantity - quantity);
-        m_trades.emplace_back(highestBidIt->getId(), m_currId, highestBidPrice,
-                              quantity, timestamp);
-        quantity = 0;
-        break;
-      } else {
-        m_trades.emplace_back(highestBidIt->getId(), m_currId, highestBidPrice,
-                              highestBidQuantity, timestamp);
-        removeOrder(highestBidIt->getId());
-        quantity -= highestBidQuantity;
-
-        if (m_bids.empty())
-          break;
-
-        highestBidIt = m_bids.begin()->second.begin();
-        highestBidPrice = highestBidIt->getPrice();
-      }
-    }
+  if (incomingOrder.getSide() == Side::BUY) {
+    return fillAgainst(m_asks, incomingOrder);
   }
-  return quantity;
+
+  return fillAgainst(m_bids, incomingOrder);
 }
 
 bool Orderbook::canFill(const Order &incomingOrder) {

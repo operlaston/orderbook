@@ -25,6 +25,7 @@ public:
 
   BookSide() = default;
 
+  // template on constness to implement const_iterator
   template <bool isConst> struct Iterator {
     using iterator_category = std::forward_iterator_tag;
     using value_type = Order;
@@ -33,6 +34,7 @@ public:
     using reference = std::conditional_t<isConst, const Order &, Order &>;
 
     template <bool> friend struct Iterator;
+    friend class BookSide;
 
     using MapT = std::conditional_t<isConst, const Map *, Map *>;
     using LevelIterT = std::conditional_t<isConst, LevelConstIter, LevelIter>;
@@ -54,6 +56,8 @@ public:
     // pre-inc
     Iterator &operator++() {
       m_orderIt++;
+
+      // traverse empty levels
       while (m_orderIt == m_levelIt->second.end()) {
         m_levelIt++;
         if (m_levelIt == m_map->end()) {
@@ -76,6 +80,7 @@ public:
       return tmp;
     }
 
+    // templated to allow const_iter==iter comparisons + vice-versa
     template <bool C> bool operator==(const Iterator<C> &other) const {
       return this->m_map == other.m_map && this->m_levelIt == other.m_levelIt &&
              this->m_orderIt == other.m_orderIt;
@@ -108,6 +113,7 @@ public:
 
   iterator end() { return iterator{&m_orders, m_orders.end(), OrderIter{}}; }
 
+  // overloaded for const_iterator (const BookSide)
   const_iterator begin() const {
     LevelConstIter levelIt = m_orders.begin();
     while (levelIt != m_orders.end() && levelIt->second.empty()) {
@@ -128,6 +134,7 @@ public:
 
   const_iterator cend() const { return end(); }
 
+  // update activeOrder automatically and insert the order into the book
   iterator insert(const Order &order,
                   std::unordered_map<OrderId, OrderIter> &activeOrders) {
     auto levelIt = m_orders.try_emplace(order.getPrice()).first;
@@ -138,11 +145,16 @@ public:
     return iterator{&m_orders, levelIt, orderIt};
   }
 
-  iterator erase(OrderIter orderIt,
+  // update activeOrders automatically and erase the underlying Order object
+  iterator erase(iterator it,
                  std::unordered_map<OrderId, OrderIter> &activeOrders) {
+    OrderIter orderIt = it.m_orderIt;
     activeOrders.erase(orderIt->getId());
-    LevelIter levelIt = m_orders.find(orderIt->getPrice());
+    LevelIter levelIt = it.m_levelIt;
     assert(levelIt != m_orders.end());
+
+    // get the iterator to the next order object and cleanup empty level if
+    // there is one
     OrderIter nextOrderIt = levelIt->second.erase(orderIt);
     if (nextOrderIt == levelIt->second.end()) {
       LevelIter nextLevelIt = levelIt;

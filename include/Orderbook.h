@@ -8,14 +8,13 @@
 #include <Utils.h>
 #include <functional>
 #include <list>
-#include <map>
 
 using PriceLevel = std::list<Order>;
 
 class Orderbook {
 private:
-  std::map<Price, PriceLevel, std::greater<Price>> m_bids;
-  std::map<Price, PriceLevel> m_asks;
+  BookSide<std::greater<Price>> m_bids;
+  BookSide<std::less<Price>> m_asks;
   std::unordered_map<OrderId, PriceLevel::iterator> m_activeOrders;
   std::vector<Trade> m_trades;
   OrderId m_currId = 0; // this is 1 on the first trade
@@ -23,6 +22,10 @@ private:
   Quantity matchOrder(const Order &incomingOrder);
   bool canFill(const Order &incomingOrder);
   bool removeOrder(OrderId orderId);
+
+  template <typename Compare>
+  Quantity fillAgainst(BookSide<Compare> &restingBook,
+                       const Order &incomingOrder);
 
 public:
   // Orderbook();
@@ -36,9 +39,7 @@ public:
   void printOrderbook();
   void printTrades();
   const std::vector<Trade> &getTrades() const { return m_trades; }
-  const std::map<Price, PriceLevel, std::greater<Price>> &getBids() const {
-    return m_bids;
-  }
-  const std::map<Price, PriceLevel> &getAsks() const { return m_asks; }
+  const BookSide<std::greater<Price>> &getBids() const { return m_bids; }
+  const BookSide<std::less<Price>> &getAsks() const { return m_asks; }
   void run();
 };
