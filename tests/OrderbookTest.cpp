@@ -36,8 +36,8 @@ protected:
                 TimeInForce::NONE);
   }
 
-  Order getTopBid() { return *ob.getBids().begin()->second.begin(); }
-  Order getTopAsk() { return *ob.getAsks().begin()->second.begin(); }
+  Order getTopBid() { return *ob.getBids().begin(); }
+  Order getTopAsk() { return *ob.getAsks().begin(); }
   Trade getLastTrade() { return ob.getTrades().back(); }
 };
 
@@ -113,6 +113,7 @@ TEST_F(OrderbookTest, LargeBidPartialFills) {
 }
 
 TEST_F(OrderbookTest, LargeAskPartialFills) {
+  // larger quantity ask to test partial fill
   limitBidGtc(105.0, 2);
   limitAskGtc(100.0, 3);
 
@@ -124,27 +125,36 @@ TEST_F(OrderbookTest, LargeAskPartialFills) {
   EXPECT_DOUBLE_EQ(topAsk.getPrice(), 100.0);
   EXPECT_EQ(topAsk.getQuantity(), 1u);
 }
-//
-// TEST_F(OrderbookTest, FullFillBidPricePriorityRespected) {
-//   limitAskGtc(105.0, 1);
-//   limitAskGtc(100.0, 1);
-//   limitAskGtc(102.0, 2);
-//   limitBidGtc(110.0, 2);
-//
-//   // should fill 100 for quantity 1 and 102 for quantity 1
-//   EXPECT_EQ(lastRes.status, ResponseStatus::SUCCESS);
-//   ASSERT_EQ(ob.getTrades().size(), 2u);
-//   EXPECT_EQ(ob.getTrades()[1].getPrice(), 102.0);
-//   EXPECT_EQ(ob.getTrades()[0].getPrice(), 100.0);
-//   EXPECT_EQ(ob.getTrades()[1].getQuantity(), 1u);
-//   EXPECT_EQ(ob.getTrades()[0].getPrice(), 1u);
-//   EXPECT_TRUE(ob.getBids().empty());
-//   ASSERT_EQ(ob.getAsks().size(), 2u);
-//   EXPECT_EQ(getTopAsk().getPrice(), 102.0);
-//   EXPECT_EQ(getTopAsk().getQuantity(), 1u);
-// }
+
+TEST_F(OrderbookTest, CompleteFillBidPricePriorityRespected) {
+  // asks placed out of order
+  limitAskGtc(105.0, 1);
+  limitAskGtc(100.0, 1);
+  limitAskGtc(102.0, 2);
+  limitBidGtc(110.0, 2);
+
+  // should fill 100 for quantity 1 and 102 for quantity 1
+  EXPECT_EQ(lastRes.status, ResponseStatus::SUCCESS);
+  // check trades were logged properly
+  ASSERT_EQ(ob.getTrades().size(), 2u);
+  EXPECT_EQ(ob.getTrades()[1].getPrice(), 102.0);
+  EXPECT_EQ(ob.getTrades()[0].getPrice(), 100.0);
+  EXPECT_EQ(ob.getTrades()[1].getQuantity(), 1u);
+  EXPECT_EQ(ob.getTrades()[0].getQuantity(), 1u);
+
+  // check correctness of book state
+  EXPECT_TRUE(ob.getBids().empty());
+  ASSERT_EQ(ob.getAsks().size(), 2u);
+  auto it = ob.getAsks().begin();
+  EXPECT_EQ(it->getPrice(), 102.0);
+  EXPECT_EQ(it->getQuantity(), 1u);
+  it++;
+  EXPECT_EQ(it->getPrice(), 105.0);
+  EXPECT_EQ(it->getQuantity(), 1u);
+}
 
 TEST_F(OrderbookTest, MarketOrderBidFilled) {
+  // check if market bid fills correctly
   limitAskGtc(105.0, 1);
   limitAskGtc(100.0, 1);
   marketBid(1);
