@@ -41,5 +41,8 @@ public:
   const std::vector<Trade> &getTrades() const { return m_trades; }
   const BookSide<std::greater<Price>> &getBids() const { return m_bids; }
   const BookSide<std::less<Price>> &getAsks() const { return m_asks; }
+  const std::unordered_map<OrderId, PriceLevel::iterator> &getActiveOrders() {
+    return m_activeOrders;
+  }
   void run();
 };
