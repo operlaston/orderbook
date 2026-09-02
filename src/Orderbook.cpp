@@ -16,8 +16,8 @@ Orderbook::Orderbook(ServerEngineContext &ctx) : m_ctx(ctx) {}
 
 // matches the incoming order against the resting/opposite-side book
 template <typename Compare>
-Quantity Orderbook::fillAgainst(BookSide<Compare> &restingBook,
-                                const Order &incomingOrder) {
+Quantity Orderbook::matchAgainst(BookSide<Compare> &restingBook,
+                                 const Order &incomingOrder, bool doFill) {
   // gives us std::less if restingBook is asks
   // gives us std::greater if restingBook is bids
   // we want price >= lowestAskPrice and price <= highestBidPrice
@@ -32,6 +32,10 @@ Quantity Orderbook::fillAgainst(BookSide<Compare> &restingBook,
     Quantity filledQuantity = std::min(incomingQuantity, restingQuantity);
 
     incomingQuantity -= filledQuantity;
+
+    if (!doFill) {
+      continue;
+    }
 
     OrderId bidId =
         (incomingOrder.getSide() == Side::BUY) ? m_currId : bookIt->getId();
@@ -53,77 +57,26 @@ Quantity Orderbook::fillAgainst(BookSide<Compare> &restingBook,
 // returns the remaining quantity of the order
 Quantity Orderbook::matchOrder(const Order &incomingOrder) {
 
-  if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL &&
-      !canFill(incomingOrder)) {
-    return incomingOrder.getQuantity();
-  }
+  // initialize a const here to avoid the "magic number"
+  const bool doFill = true;
 
   if (incomingOrder.getSide() == Side::BUY) {
-    return fillAgainst(m_asks, incomingOrder);
+    if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL) {
+      Quantity remainingQuantity = matchAgainst(m_asks, incomingOrder, !doFill);
+      if (remainingQuantity > 0)
+        return remainingQuantity;
+    }
+    return matchAgainst(m_asks, incomingOrder, doFill);
   }
 
-  return fillAgainst(m_bids, incomingOrder);
-}
-
-bool Orderbook::canFill(const Order &incomingOrder) {
-  Side side = incomingOrder.getSide();
-  Price price = incomingOrder.getPrice();
-  Quantity quantity = incomingOrder.getQuantity();
-
-  if (side == Side::BUY && !m_asks.empty()) {
-    auto currPriceLevel = m_asks.begin();
-    PriceLevel *currPriceList = &currPriceLevel->second;
-    auto currPriceListIter = currPriceList->begin();
-    // check the lowest ask
-    while (price >= currPriceListIter->getPrice()) {
-
-      Quantity lowestAskQuantity = currPriceListIter->getQuantity();
-
-      // fill the order and break out of loop if bid quantity does
-      // not exceed lowest ask quantity
-      if (lowestAskQuantity >= quantity) {
-        quantity = 0;
-        break;
-      } else {
-        quantity -= lowestAskQuantity;
-        currPriceListIter++;
-        if (currPriceListIter == currPriceList->end()) {
-          currPriceLevel++;
-          if (currPriceLevel == m_asks.end()) {
-            break;
-          }
-          currPriceList = &currPriceLevel->second;
-          currPriceListIter = currPriceList->begin();
-        }
-      }
-    }
-  } else if (side == Side::SELL && !m_bids.empty()) {
-    auto currPriceLevel = m_bids.begin();
-    PriceLevel *currPriceList = &currPriceLevel->second;
-    auto currPriceListIter = currPriceList->begin();
-    // check the lowest bid
-    while (price <= currPriceListIter->getPrice()) {
-      Quantity highestBidQuantity = currPriceListIter->getQuantity();
-
-      if (highestBidQuantity >= quantity) {
-        quantity = 0;
-        break;
-      } else {
-        quantity -= highestBidQuantity;
-        currPriceListIter++;
-        if (currPriceListIter == currPriceList->end()) {
-          currPriceLevel++;
-          if (currPriceLevel == m_bids.end()) {
-            break;
-          }
-          currPriceList = &currPriceLevel->second;
-          currPriceListIter = currPriceList->begin();
-        }
-      }
-    }
+  // incoming is an ask
+  if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL) {
+    Quantity remainingQuantity = matchAgainst(m_bids, incomingOrder, !doFill);
+    if (remainingQuantity > 0)
+      return remainingQuantity;
   }
 
-  return quantity == 0;
+  return matchAgainst(m_bids, incomingOrder, doFill);
 }
 
 void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,

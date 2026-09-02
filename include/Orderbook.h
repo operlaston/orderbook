@@ -24,8 +24,8 @@ private:
   bool removeOrder(OrderId orderId);
 
   template <typename Compare>
-  Quantity fillAgainst(BookSide<Compare> &restingBook,
-                       const Order &incomingOrder);
+  Quantity matchAgainst(BookSide<Compare> &restingBook,
+                        const Order &incomingOrder, bool doFill);
 
 public:
   // Orderbook();
