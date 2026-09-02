@@ -41,7 +41,7 @@ Quantity Orderbook::matchAgainst(BookSide<Compare> &restingBook,
     OrderId bidId =
         (incomingOrder.getSide() == Side::BUY) ? m_currId : bookIt->getId();
     OrderId askId =
-        (incomingOrder.getSide() == Side::BUY) ? bookIt->getId() : m_currId;
+        (incomingOrder.getSide() == Side::SELL) ? m_currId : bookIt->getId();
 
     m_trades.emplace_back(bidId, askId, bookIt->getPrice(), filledQuantity,
                           incomingOrder.getTimestamp());
