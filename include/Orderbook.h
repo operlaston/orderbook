@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ResponseTypes.h"
+#include <BookSide.h>
 #include <Order.h>
 #include <ServerEngineContext.h>
 #include <Trade.h>

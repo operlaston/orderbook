@@ -43,7 +43,7 @@ public:
         : m_map(map), m_levelIt(levelIt), m_orderIt(orderIt) {}
 
     // allow conversion from iterator -> const_iterator
-    Iterator(const Iterator<false> &other)
+    Iterator(const Iterator<!isConst> &other)
       requires isConst
         : m_map(other.m_map), m_levelIt(other.m_levelIt),
           m_orderIt(other.m_orderIt) {}
@@ -95,9 +95,6 @@ public:
   using const_iterator = Iterator<true>;
 
   iterator begin() {
-    if (m_orders.empty()) {
-      return end();
-    }
     LevelIter levelIt = m_orders.begin();
     while (levelIt != m_orders.end() && levelIt->second.empty()) {
       ++levelIt;
@@ -112,9 +109,6 @@ public:
   iterator end() { return iterator{&m_orders, m_orders.end(), OrderIter{}}; }
 
   const_iterator begin() const {
-    if (m_orders.empty()) {
-      return end();
-    }
     LevelConstIter levelIt = m_orders.begin();
     while (levelIt != m_orders.end() && levelIt->second.empty()) {
       ++levelIt;
@@ -139,19 +133,30 @@ public:
     auto levelIt = m_orders.try_emplace(order.getPrice()).first;
     levelIt->second.push_back(order);
     auto orderIt = std::prev(levelIt->second.end());
+    assert(!activeOrders.contains(order.getId()));
     activeOrders[order.getId()] = orderIt;
     return iterator{&m_orders, levelIt, orderIt};
   }
 
-  void remove(OrderIter orderIt,
-              std::unordered_map<OrderId, OrderIter> &activeOrders) {
+  iterator erase(OrderIter orderIt,
+                 std::unordered_map<OrderId, OrderIter> &activeOrders) {
     activeOrders.erase(orderIt->getId());
-    auto levelIt = m_orders.find(orderIt->getPrice());
+    LevelIter levelIt = m_orders.find(orderIt->getPrice());
     assert(levelIt != m_orders.end());
-    levelIt->second.erase(orderIt);
-    if (levelIt->second.empty()) {
-      m_orders.erase(levelIt);
+    OrderIter nextOrderIt = levelIt->second.erase(orderIt);
+    if (nextOrderIt == levelIt->second.end()) {
+      LevelIter nextLevelIt = levelIt;
+      nextLevelIt++;
+      if (levelIt->second.empty()) {
+        m_orders.erase(levelIt);
+      }
+      if (nextLevelIt == m_orders.end()) {
+        return end();
+      }
+      nextOrderIt = nextLevelIt->second.begin();
+      return iterator{&m_orders, nextLevelIt, nextOrderIt};
     }
+    return iterator{&m_orders, levelIt, nextOrderIt};
   }
 
 private:
