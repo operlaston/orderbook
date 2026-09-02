@@ -8,6 +8,7 @@
 #include <iterator>
 #include <list>
 #include <map>
+#include <optional>
 #include <type_traits>
 #include <unordered_map>
 
@@ -149,10 +150,34 @@ public:
   iterator erase(iterator it,
                  std::unordered_map<OrderId, OrderIter> &activeOrders) {
     OrderIter orderIt = it.m_orderIt;
-    activeOrders.erase(orderIt->getId());
     LevelIter levelIt = it.m_levelIt;
-    assert(levelIt != m_orders.end());
+    return remove(orderIt, levelIt, activeOrders);
+  }
 
+  iterator erase(OrderIter orderIt,
+                 std::unordered_map<OrderId, OrderIter> &activeOrders) {
+    LevelIter levelIt = m_orders.find(orderIt->getPrice());
+    return remove(orderIt, levelIt, activeOrders);
+  }
+
+  bool empty() { return m_orders.empty(); }
+
+  std::optional<Price> getLastPrice() {
+    if (empty()) {
+      return std::nullopt;
+    }
+    return std::prev(m_orders.end())->first;
+  }
+
+private:
+  Map m_orders;
+  static_assert(std::forward_iterator<iterator>);
+  static_assert(std::forward_iterator<const_iterator>);
+
+  iterator remove(OrderIter orderIt, LevelIter levelIt,
+                  std::unordered_map<OrderId, OrderIter> &activeOrders) {
+    assert(levelIt != m_orders.end());
+    activeOrders.erase(orderIt->getId());
     // get the iterator to the next order object and cleanup empty level if
     // there is one
     OrderIter nextOrderIt = levelIt->second.erase(orderIt);
@@ -170,9 +195,4 @@ public:
     }
     return iterator{&m_orders, levelIt, nextOrderIt};
   }
-
-private:
-  Map m_orders;
-  static_assert(std::forward_iterator<iterator>);
-  static_assert(std::forward_iterator<const_iterator>);
 };

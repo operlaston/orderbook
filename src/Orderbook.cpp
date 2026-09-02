@@ -100,19 +100,17 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
 
   if (orderType == OrderType::MARKET) {
     timeInForce = TimeInForce::IMMEDIATE_OR_CANCEL;
+    std::optional<Price> lastPrice;
     if (side == Side::BUY) {
-      if (m_asks.empty()) {
-        res.status = ResponseStatus::CANT_FILL;
-        return;
-      }
-      price = std::prev(m_asks.end())->first;
+      lastPrice = m_asks.getLastPrice();
     } else {
-      if (m_bids.empty()) {
-        res.status = ResponseStatus::CANT_FILL;
-        return;
-      }
-      price = std::prev(m_bids.end())->first;
+      lastPrice = m_bids.getLastPrice();
     }
+    if (lastPrice == std::nullopt) {
+      res.status = ResponseStatus::CANT_FILL;
+      return;
+    }
+    price = *lastPrice;
   }
 
   if (price <= 0 || quantity <= 0) {
@@ -156,17 +154,13 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
   if (side == Side::BUY) {
 
     if (remainingQuantity > 0) {
-      PriceLevel &priceLevel = m_bids[price];
-      priceLevel.push_back(order);
-      m_activeOrders[m_currId] = std::prev(priceLevel.end());
+      m_bids.insert(order, m_activeOrders);
     }
 
   } else if (side == Side::SELL) {
 
     if (remainingQuantity > 0) {
-      PriceLevel &priceLevel = m_asks[price];
-      priceLevel.push_back(order);
-      m_activeOrders[m_currId] = std::prev(priceLevel.end());
+      m_asks.insert(order, m_activeOrders);
     }
   }
 
@@ -185,19 +179,10 @@ bool Orderbook::removeOrder(OrderId orderId) {
   auto it = m_activeOrders[orderId];
   Order order = *it;
   if (order.getSide() == Side::BUY) {
-    m_bids[order.getPrice()].erase(it);
-    // if the list for the price level is empty, then erase the entry list
-    if (m_bids[order.getPrice()].empty()) {
-      m_bids.erase(order.getPrice());
-    }
+    m_bids.erase(it, m_activeOrders);
   } else if (order.getSide() == Side::SELL) {
-    m_asks[order.getPrice()].erase(it);
-    // if the list for the price level is empty, then erase the entry list
-    if (m_asks[order.getPrice()].empty()) {
-      m_asks.erase(order.getPrice());
-    }
+    m_asks.erase(it, m_activeOrders);
   }
-  m_activeOrders.erase(orderId);
   return true;
 }
 
@@ -239,17 +224,13 @@ void Orderbook::modifyOrder(Response::ModifyOrder &res, OrderId orderId,
 
 void Orderbook::printOrderbook() {
   std::cout << "\n|==========Asks==========|" << std::endl;
-  for (const auto &[priceLevel, orders] : m_asks) {
-    for (const auto &order : orders) {
-      order.display();
-    }
+  for (const Order &order : m_asks) {
+    order.display();
   }
 
   std::cout << "\n|==========Bids==========|" << std::endl;
-  for (const auto &[priceLevel, orders] : m_bids) {
-    for (const auto &order : orders) {
-      order.display();
-    }
+  for (const Order &order : m_bids) {
+    order.display();
   }
 }
 
