@@ -1,6 +1,7 @@
 #include "GlobalConsts.h"
 #include "RequestTypes.h"
 #include "ResponseTypes.h"
+#include "TimeInForce.h"
 #include <Orderbook.h>
 #include <ServerEngineContext.h>
 #include <chrono>
@@ -60,20 +61,19 @@ Quantity Orderbook::matchOrder(const Order &incomingOrder) {
   // initialize a const here to avoid the "magic number"
   const bool doFill = true;
 
-  if (incomingOrder.getSide() == Side::BUY) {
-    if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL) {
-      Quantity remainingQuantity = matchAgainst(m_asks, incomingOrder, !doFill);
-      if (remainingQuantity > 0)
-        return remainingQuantity;
+  // if fill or kill timeinforce first check before filling anything
+  if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL) {
+    Quantity remainingQuantity =
+        incomingOrder.getSide() == Side::BUY
+            ? matchAgainst(m_asks, incomingOrder, !doFill)
+            : matchAgainst(m_bids, incomingOrder, !doFill);
+    if (remainingQuantity > 0) {
+      return remainingQuantity;
     }
-    return matchAgainst(m_asks, incomingOrder, doFill);
   }
 
-  // incoming is an ask
-  if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL) {
-    Quantity remainingQuantity = matchAgainst(m_bids, incomingOrder, !doFill);
-    if (remainingQuantity > 0)
-      return remainingQuantity;
+  if (incomingOrder.getSide() == Side::BUY) {
+    return matchAgainst(m_asks, incomingOrder, doFill);
   }
 
   return matchAgainst(m_bids, incomingOrder, doFill);
