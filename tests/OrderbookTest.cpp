@@ -36,8 +36,8 @@ protected:
                 TimeInForce::NONE);
   }
 
-  Order getTopBid() { return *ob.getBids().begin()->second.begin(); }
-  Order getTopAsk() { return *ob.getAsks().begin()->second.begin(); }
+  Order getTopBid() { return *ob.getBids().begin(); }
+  Order getTopAsk() { return *ob.getAsks().begin(); }
   Trade getLastTrade() { return ob.getTrades().back(); }
 };
 

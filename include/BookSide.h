@@ -138,15 +138,17 @@ public:
   // update activeOrder automatically and insert the order into the book
   iterator insert(const Order &order,
                   std::unordered_map<OrderId, OrderIter> &activeOrders) {
+    m_size++;
     auto levelIt = m_orders.try_emplace(order.getPrice()).first;
-    levelIt->second.push_back(order);
-    auto orderIt = std::prev(levelIt->second.end());
+    auto orderIt = levelIt->second.insert(levelIt->second.end(), order);
     assert(!activeOrders.contains(order.getId()));
     activeOrders[order.getId()] = orderIt;
     return iterator{&m_orders, levelIt, orderIt};
   }
 
-  // update activeOrders automatically and erase the underlying Order object
+  // updates activeOrders automatically and erases the underlying Order object
+  // assumes that the iterator is valid
+  // passing an invalid iterator will result in UB
   iterator erase(iterator it,
                  std::unordered_map<OrderId, OrderIter> &activeOrders) {
     OrderIter orderIt = it.m_orderIt;
@@ -154,16 +156,20 @@ public:
     return remove(orderIt, levelIt, activeOrders);
   }
 
+  // assumes that the iterator is valid
+  // passing an invalid iterator will result in UB
   iterator erase(OrderIter orderIt,
                  std::unordered_map<OrderId, OrderIter> &activeOrders) {
     LevelIter levelIt = m_orders.find(orderIt->getPrice());
     return remove(orderIt, levelIt, activeOrders);
   }
 
-  bool empty() { return m_orders.empty(); }
+  size_t size() const { return m_size; }
 
-  std::optional<Price> getLastPrice() {
-    if (empty()) {
+  bool empty() const { return m_orders.empty(); }
+
+  std::optional<Price> getLastPrice() const {
+    if (m_orders.empty()) {
       return std::nullopt;
     }
     return std::prev(m_orders.end())->first;
@@ -171,11 +177,13 @@ public:
 
 private:
   Map m_orders;
+  size_t m_size{};
   static_assert(std::forward_iterator<iterator>);
   static_assert(std::forward_iterator<const_iterator>);
 
   iterator remove(OrderIter orderIt, LevelIter levelIt,
                   std::unordered_map<OrderId, OrderIter> &activeOrders) {
+    m_size--;
     assert(levelIt != m_orders.end());
     activeOrders.erase(orderIt->getId());
     // get the iterator to the next order object and cleanup empty level if
