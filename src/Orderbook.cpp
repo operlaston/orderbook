@@ -1,6 +1,7 @@
 #include "GlobalConsts.h"
 #include "RequestTypes.h"
 #include "ResponseTypes.h"
+#include <BookSide.h>
 #include <Orderbook.h>
 #include <ServerEngineContext.h>
 #include <chrono>
