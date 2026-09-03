@@ -4,6 +4,7 @@
 #include <Side.h>
 #include <TimeInForce.h>
 #include <Utils.h>
+#include <variant>
 
 namespace Request {
 struct NewOrder {

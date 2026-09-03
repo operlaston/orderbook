@@ -4,14 +4,12 @@
 #include "TimeInForce.h"
 #include <Orderbook.h>
 #include <ServerEngineContext.h>
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
 #include <optional>
 #include <variant>
-
-// Orderbook::Orderbook() {}
+#include <x86intrin.h>
 
 Orderbook::Orderbook(ServerEngineContext &ctx) : m_ctx(ctx) {}
 
@@ -123,7 +121,7 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
     return;
   }
 
-  Timestamp timestamp = std::chrono::system_clock::now();
+  Timestamp timestamp = __rdtsc();
 
   Order order(m_currId, side, price, quantity, timestamp, orderType,
               timeInForce);
