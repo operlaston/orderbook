@@ -18,6 +18,7 @@ template <typename Compare = std::less<Price>> class BookSide {
 
 public:
   // map iterator is dependent on template parameter
+  // so we mark LevelIter with typename
   using Map = std::map<Price, PriceLevel, Compare>;
   using LevelIter = typename Map::iterator;
   using OrderIter = PriceLevel::iterator;
@@ -34,7 +35,9 @@ public:
     using pointer = std::conditional_t<isConst, const Order *, Order *>;
     using reference = std::conditional_t<isConst, const Order &, Order &>;
 
+    // allow any templated Iterator type access private members
     template <bool> friend struct Iterator;
+
     friend class BookSide;
 
     using MapT = std::conditional_t<isConst, const Map *, Map *>;
@@ -102,6 +105,7 @@ public:
 
   iterator begin() {
     LevelIter levelIt = m_orders.begin();
+    // traverse empty levels (although they shouldnt exist anyway)
     while (levelIt != m_orders.end() && levelIt->second.empty()) {
       ++levelIt;
     }
@@ -181,6 +185,7 @@ private:
   static_assert(std::forward_iterator<iterator>);
   static_assert(std::forward_iterator<const_iterator>);
 
+  // helper function for erase()
   iterator remove(OrderIter orderIt, LevelIter levelIt,
                   std::unordered_map<OrderId, OrderIter> &activeOrders) {
     m_size--;
