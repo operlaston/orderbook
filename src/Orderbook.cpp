@@ -18,7 +18,8 @@ Orderbook::Orderbook(ServerEngineContext &ctx) : m_ctx(ctx) {}
 // matches the incoming order against the resting/opposite-side book
 template <typename Compare>
 Quantity Orderbook::matchAgainst(BookSide<Compare> &restingBook,
-                                 const Order &incomingOrder, bool doFill) {
+                                 const Order &incomingOrder,
+                                 const bool doFill) {
   // gives us std::less if restingBook is asks
   // gives us std::greater if restingBook is bids
   // we want price >= lowestAskPrice and price <= highestBidPrice
@@ -35,6 +36,7 @@ Quantity Orderbook::matchAgainst(BookSide<Compare> &restingBook,
     incomingQuantity -= filledQuantity;
 
     if (!doFill) {
+      bookIt++;
       continue;
     }
 
@@ -130,12 +132,20 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
 
   // we do not add the order to the orderbook if immediate or cancel
   // or fill or kill
-  if (timeInForce == TimeInForce::IMMEDIATE_OR_CANCEL ||
-      timeInForce == TimeInForce::FILL_OR_KILL) {
+  if (timeInForce == TimeInForce::IMMEDIATE_OR_CANCEL) {
     if (quantity == remainingQuantity) {
       res.status = ResponseStatus::CANT_FILL;
     } else if (remainingQuantity > 0) {
       res.status = ResponseStatus::PARTIAL_FILL;
+    } else {
+      res.status = ResponseStatus::SUCCESS;
+    }
+    return;
+  }
+
+  if (timeInForce == TimeInForce::FILL_OR_KILL) {
+    if (remainingQuantity > 0) {
+      res.status = ResponseStatus::CANT_FILL;
     } else {
       res.status = ResponseStatus::SUCCESS;
     }
@@ -147,6 +157,7 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
   } else {
     res.status = ResponseStatus::SUCCESS;
   }
+
   // order is not fok or ioc so we change the quantity to
   // what remains
   order.setQuantity(remainingQuantity);
@@ -207,7 +218,7 @@ void Orderbook::modifyOrder(Response::ModifyOrder &res, OrderId orderId,
   // modify the order in place
   auto it = m_activeOrders[orderId];
   Quantity oldQuantity = it->getQuantity();
-  if (oldQuantity < newQuantity || newQuantity <= 0) {
+  if (oldQuantity < newQuantity || newQuantity == 0) {
     // newQuantity must be less than the old quantity
     // and must be a positive number
     std::cout << "Error while modifying order: newQuantity must be a less "

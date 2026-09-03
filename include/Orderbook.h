@@ -25,7 +25,7 @@ private:
 
   template <typename Compare>
   Quantity matchAgainst(BookSide<Compare> &restingBook,
-                        const Order &incomingOrder, bool doFill);
+                        const Order &incomingOrder, const bool doFill);
 
 public:
   // Orderbook();
