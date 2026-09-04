@@ -38,7 +38,7 @@ Incoming messages communicate the fundamental attributes of a trade request, inc
 | `Side` | 1 | Indicates whether it is a Buy or Sell |
 | `OrderType` | 1 | Indicates whether it is a Limit or Market order |
 | `TimeInForce` | 1 | Specifies how long the order remains active |
-| `Price` | 8 | The requested order price |
+| `Price` | 8 | The requested order price. This value MUST be passed as 0 on market orders or else the request will be rejected |
 | `Quantity` | 8 | The requested number of units |
 
 #### Cancel Order Message
@@ -74,7 +74,7 @@ Incoming messages communicate the fundamental attributes of a trade request, inc
 * `1` = MARKET
 
 **Time In Force**
-* `0` = NONE (this option is meant to be used for market orders and defaults to GTC on limit orders)
+* `0` = NONE - this option <b>MUST</b> be used for market orders and <b>MUST NOT</b> be used for limit orders or else BAD_REQUEST will be returned
 * `1` = GOODTILCANCEL (GTC)
 * `2` = IMMEDIATE OR CANCEL (IOC)
 * `3` = FILL OR KILL (FOK)

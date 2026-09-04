@@ -271,9 +271,6 @@ TEST_F(OrderbookTest, MarketOrderAskFilled) {
   EXPECT_TRUE(ob.getActiveOrders().contains(bidId));
 }
 
-// didn't feel like writing tests anymore so
-// everything below this comment is claude code generated
-
 TEST_F(OrderbookTest, FullFillBidTimePriorityRespected) {
   // two resting bids at the same price; the first placed must fill first
   limitBidGtc(100.0, 1);
@@ -536,4 +533,34 @@ TEST_F(OrderbookTest, RejectsNonPositiveQuantity) {
   EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
   EXPECT_TRUE(ob.getBids().empty());
   EXPECT_TRUE(ob.getActiveOrders().empty());
+}
+
+TEST_F(OrderbookTest, RejectsBadTimeInForceOnLimitOrder) {
+  ob.addOrder(lastRes, Side::BUY, 123.0, 123, OrderType::LIMIT,
+              TimeInForce::NONE);
+  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
+  ob.addOrder(lastRes, Side::BUY, 123.0, 123, OrderType::LIMIT,
+              static_cast<TimeInForce>(123));
+  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
+}
+
+TEST_F(OrderbookTest, RejectsBadTimeInForceOnMarketOrder) {
+  ob.addOrder(lastRes, Side::BUY, 0, 123, OrderType::MARKET,
+              TimeInForce::GOOD_TILL_CANCEL);
+  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
+  ob.addOrder(lastRes, Side::BUY, 0, 123, OrderType::MARKET,
+              TimeInForce::FILL_OR_KILL);
+  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
+  ob.addOrder(lastRes, Side::BUY, 0, 123, OrderType::MARKET,
+              TimeInForce::IMMEDIATE_OR_CANCEL);
+  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
+  ob.addOrder(lastRes, Side::BUY, 0, 123, OrderType::MARKET,
+              static_cast<TimeInForce>(123));
+  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
+}
+
+TEST_F(OrderbookTest, RejectsNonZeroPriceOnMarketOrder) {
+  ob.addOrder(lastRes, Side::BUY, 123, 123, OrderType::MARKET,
+              TimeInForce::NONE);
+  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
 }

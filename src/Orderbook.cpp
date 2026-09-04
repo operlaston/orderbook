@@ -98,6 +98,20 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
     return;
   }
 
+  if (orderType == OrderType::LIMIT &&
+      timeInForce != TimeInForce::FILL_OR_KILL &&
+      timeInForce != TimeInForce::IMMEDIATE_OR_CANCEL &&
+      timeInForce != TimeInForce::GOOD_TILL_CANCEL) {
+    res.status = ResponseStatus::BAD_REQUEST;
+    return;
+  }
+
+  if (orderType == OrderType::MARKET &&
+      (timeInForce != TimeInForce::NONE || price != 0)) {
+    res.status = ResponseStatus::BAD_REQUEST;
+    return;
+  }
+
   if (orderType == OrderType::MARKET) {
     timeInForce = TimeInForce::IMMEDIATE_OR_CANCEL;
     std::optional<Price> lastPrice;
