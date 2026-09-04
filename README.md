@@ -38,7 +38,7 @@ Incoming messages communicate the fundamental attributes of a trade request, inc
 | `Side` | 1 | Indicates whether it is a Buy or Sell |
 | `OrderType` | 1 | Indicates whether it is a Limit or Market order |
 | `TimeInForce` | 1 | Specifies how long the order remains active |
-| `Price` | 8 | The requested order price. This value MUST be passed as 0 on market orders or else the request will be rejected |
+| `Price` | 8 | The requested order price<br>*<i><b>This value MUST be passed in as</b></i> `0` <i><b>on market orders or else the request will be rejected</b></i> |
 | `Quantity` | 8 | The requested number of units |
 
 #### Cancel Order Message
