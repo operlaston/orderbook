@@ -113,6 +113,8 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
   }
 
   if (orderType == OrderType::MARKET) {
+    // set the price and tif for market orders
+    // to the worst price in the opposite side and ioc
     timeInForce = TimeInForce::IMMEDIATE_OR_CANCEL;
     std::optional<Price> lastPrice;
     if (side == Side::BUY) {
