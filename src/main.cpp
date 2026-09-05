@@ -18,8 +18,8 @@ void runServer(ServerEngineContext &ctx) {
 
 int main() {
   ServerEngineContext ctx;
-  std::thread matchingEngine(runEngine, std::ref(ctx));
-  std::thread server(runServer, std::ref(ctx));
+  std::jthread matchingEngine(runEngine, std::ref(ctx));
+  std::jthread server(runServer, std::ref(ctx));
 
   matchingEngine.join();
   server.join();
