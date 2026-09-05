@@ -122,6 +122,7 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
     } else {
       lastPrice = m_bids.getLastPrice();
     }
+    // opposite side is empty. set status and return
     if (lastPrice == std::nullopt) {
       res.status = ResponseStatus::CANT_FILL;
       return;

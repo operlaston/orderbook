@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <optional>
@@ -17,7 +18,7 @@ static constexpr size_t CACHE_LINE_SIZE = 64;
 template <typename T, size_t Capacity> class SpscQueue {
 private:
   static constexpr size_t m_capacity = Capacity + 1;
-  alignas(CACHE_LINE_SIZE) T m_buffer[Capacity + 1];
+  alignas(CACHE_LINE_SIZE) std::array<T, Capacity + 1> m_buffer{};
 
   alignas(CACHE_LINE_SIZE) std::atomic<size_t> m_readPtr;
   alignas(CACHE_LINE_SIZE) std::atomic<size_t> m_writePtr;
@@ -49,4 +50,6 @@ public:
     m_readPtr.store(getNextPos(currReadPtr), std::memory_order_release);
     return item;
   }
+
+  const std::array<T, Capacity + 1> &getBuffer() const { return m_buffer; }
 };
