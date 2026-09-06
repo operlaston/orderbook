@@ -1,3 +1,4 @@
+#include "Debug.h"
 #include "GlobalConsts.h"
 #include "RequestTypes.h"
 #include "ResponseTypes.h"
@@ -83,13 +84,15 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
                          Quantity quantity, OrderType orderType,
                          TimeInForce timeInForce) {
 
-  // std::cout << "\n<==============ADDING NEW ORDER==================>\n"
-  //           << "Side: " << static_cast<int>(side)
-  //           << "\nPrice: " << static_cast<int>(price)
-  //           << "\nQuantity: " << quantity
-  //           << "\nOrderType: " << static_cast<int>(orderType)
-  //           << "\nTimeInForce: " << static_cast<int>(timeInForce) <<
-  //           std::endl;
+  if constexpr (kDebug) {
+    std::cout << "\n<==============NEW ORDER REQUEST==================>\n"
+              << "Side: " << static_cast<int>(side)
+              << "\nPrice: " << static_cast<int>(price)
+              << "\nQuantity: " << quantity
+              << "\nOrderType: " << static_cast<int>(orderType)
+              << "\nTimeInForce: " << static_cast<int>(timeInForce)
+              << std::endl;
+  }
 
   m_currId++;
 
@@ -131,9 +134,11 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
   }
 
   if (price <= 0 || quantity <= 0) {
-    std::cout << "Error while adding order. Price and quantity must be "
-                 "positive."
-              << std::endl;
+    if constexpr (kDebug) {
+      std::cerr << "Error while adding order. Price and quantity must be "
+                   "positive."
+                << std::endl;
+    }
     res.status = ResponseStatus::BAD_REQUEST;
     return;
   }
@@ -196,8 +201,10 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
 bool Orderbook::removeOrder(OrderId orderId) {
   if (!m_activeOrders.contains(orderId)) {
     // order does not exist
-    std::cout << "Error while cancelling order.\norderId: " << orderId
-              << " doesn't exist" << std::endl;
+    if constexpr (kDebug) {
+      std::cerr << "Error while cancelling order.\norderId: " << orderId
+                << " doesn't exist" << std::endl;
+    }
     return false;
   }
 
@@ -213,6 +220,11 @@ bool Orderbook::removeOrder(OrderId orderId) {
 }
 
 void Orderbook::cancelOrder(Response::CancelOrder &res, OrderId orderId) {
+  if constexpr (kDebug) {
+    std::cout << "\n<==============CANCEL ORDER REQUEST==================>\n"
+              << "OrderId: " << orderId << std::endl;
+  }
+
   if (!removeOrder(orderId)) {
     res.status = ResponseStatus::BAD_REQUEST;
   } else {
@@ -222,10 +234,18 @@ void Orderbook::cancelOrder(Response::CancelOrder &res, OrderId orderId) {
 
 void Orderbook::modifyOrder(Response::ModifyOrder &res, OrderId orderId,
                             Quantity newQuantity) {
+  if constexpr (kDebug) {
+    std::cout << "\n<==============MODIFY ORDER REQUEST==================>\n"
+              << "OrderId: " << orderId << "New Quantity: " << newQuantity
+              << std::endl;
+  }
+
   if (!m_activeOrders.contains(orderId)) {
     // invalid orderId
-    std::cout << "Error while modifying order.\norderId: " << orderId
-              << " doesn't exist" << std::endl;
+    if constexpr (kDebug) {
+      std::cerr << "Error while modifying order.\norderId: " << orderId
+                << " doesn't exist" << std::endl;
+    }
     res.status = ResponseStatus::BAD_REQUEST;
     return;
   }
@@ -236,10 +256,12 @@ void Orderbook::modifyOrder(Response::ModifyOrder &res, OrderId orderId,
   if (oldQuantity < newQuantity || newQuantity == 0) {
     // newQuantity must be less than the old quantity
     // and must be a positive number
-    std::cout << "Error while modifying order: newQuantity must be a less "
-                 "than the old quantity "
-                 "and must be a positive number"
-              << std::endl;
+    if constexpr (kDebug) {
+      std::cerr << "Error while modifying order: newQuantity must be a less "
+                   "than the old quantity "
+                   "and must be a positive number"
+                << std::endl;
+    }
     res.status = ResponseStatus::BAD_REQUEST;
     return;
   }
@@ -311,8 +333,10 @@ void Orderbook::run() {
                             writeToServer(m_ctx.eventFd);
                           }},
                  *req);
-      // printOrderbook();
-      // printTrades();
+      if constexpr (kDebug) {
+        printOrderbook();
+        printTrades();
+      }
     }
   }
 }

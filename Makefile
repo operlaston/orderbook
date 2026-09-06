@@ -3,7 +3,16 @@ CXXFLAGS := -std=c++20 -Wall -Wextra -Wno-interference-size -O2 -g -MMD -MP -pth
 GTEST_LIBS := -lgtest -lgtest_main -pthread
 LDFLAGS := -pthread
 INCLUDES := -I include
-BUILD := build
+
+# make          -> release build in build/release (debug prints compiled out)
+# make DEBUG=1  -> debug build in build/debug   (debug prints active)
+DEBUG ?= 0
+ifeq ($(DEBUG),1)
+  BUILD := build/debug
+  CXXFLAGS += -DDEBUG_BUILD -Og
+else
+  BUILD := build/release
+endif
 
 SERVER_SRCS := src/Orderbook.cpp src/Server.cpp src/main.cpp
 SERVER_OBJS := $(SERVER_SRCS:src/%.cpp=$(BUILD)/%.o)
@@ -47,6 +56,6 @@ $(BUILD)/tests: | $(BUILD)
 	mkdir -p $(BUILD)/tests
 
 clean:
-	rm -r $(BUILD)
+	rm -rf build
 
 -include $(SERVER_OBJS:.o=.d) $(BUILD)/Client.d $(TEST_OBJS:.o=.d)
