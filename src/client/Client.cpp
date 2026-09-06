@@ -16,7 +16,7 @@ int main() {
   OrderbookClient client{8080};
 
   while (true) {
-    std::string actionsText = "=======Actions=======\n"
+    std::string actionsText = "\n=======Actions=======\n"
                               "(1) New Order\n"
                               "(2) Cancel Order\n"
                               "(3) Modify Order\n";

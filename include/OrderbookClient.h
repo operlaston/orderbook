@@ -165,17 +165,19 @@ public:
 
   static int parseOption(int low, int high) {
     int actionOption = 0;
-    if (!(std::cin >> actionOption)) {
-      std::cout << "Please enter a valid number from " << low << "-" << high
-                << std::endl;
-      std::cin.clear();
-      std::cin.ignore(std::numeric_limits<std::streamsize>::max());
-      return -1;
-    } else if (actionOption < low || actionOption > high) {
-      std::cout << "Please enter a valid number from " << low << "-" << high
-                << std::endl;
-      std::cin.ignore(std::numeric_limits<std::streamsize>::max());
-      return -1;
+    bool success = false;
+    while (!success) {
+      if (!(std::cin >> actionOption)) {
+        std::cout << "Please enter a valid number from " << low << "-" << high
+                  << std::endl;
+        std::cin.clear();
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max());
+      } else if (actionOption < low || actionOption > high) {
+        std::cout << "Please enter a valid number from " << low << "-" << high
+                  << std::endl;
+      } else {
+        success = true;
+      }
     }
     return actionOption;
   }
