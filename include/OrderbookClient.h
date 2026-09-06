@@ -119,7 +119,8 @@ public:
     uint64_t newOrderIdRaw;
     memcpy(&newOrderIdRaw, &responseBuf[1], 8);
     OrderId newOrderId = be64toh(newOrderIdRaw);
-    std::cout << "New Order ID is " << newOrderId << std::endl;
+    if (newOrderId > 0)
+      std::cout << "\nNew Order ID is " << newOrderId << std::endl;
     return newOrderId;
   }
 
