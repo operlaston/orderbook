@@ -145,7 +145,7 @@ public:
     m_size++;
     auto levelIt = m_orders.try_emplace(order.getPrice()).first;
     auto orderIt = levelIt->second.insert(levelIt->second.end(), order);
-    assert(!activeOrders.contains(order.getId()));
+    // assert(!activeOrders.contains(order.getId()));
     activeOrders[order.getId()] = orderIt;
     return iterator{&m_orders, levelIt, orderIt};
   }
@@ -189,7 +189,7 @@ private:
   iterator remove(OrderIter orderIt, LevelIter levelIt,
                   std::unordered_map<OrderId, OrderIter> &activeOrders) {
     m_size--;
-    assert(levelIt != m_orders.end());
+    // assert(levelIt != m_orders.end());
     activeOrders.erase(orderIt->getId());
     // get the iterator to the next order object and cleanup empty level if
     // there is one

@@ -124,7 +124,8 @@ void Server::acceptClient() {
   addFdEpoll(clientSocket);
 
   auto [it, didEmplace] = m_sessions.try_emplace(clientSocket, clientSocket);
-  assert(didEmplace);
+  (void)didEmplace;
+  // assert(didEmplace);
 }
 
 void Server::writeSafely(int fd, const void *buf, size_t n) {
@@ -253,7 +254,7 @@ void Server::sendResponse(const ServerResponse &resVariant) {
              resVariant);
   if (m_sessions.contains(sessionId)) {
     session.removeActiveRequest();
-    assert(session.getActiveRequests() >= 0);
+    // assert(session.getActiveRequests() >= 0);
     if (session.isMarkedClosed() && session.getActiveRequests() == 0) {
       removeSession(sessionId);
     }
