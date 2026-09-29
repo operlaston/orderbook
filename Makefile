@@ -56,15 +56,10 @@ $(BUILD)/tests/%.o: tests/%.cpp | $(BUILD)/tests
 # bench
 bench: $(BENCH_BINS)
 	./$(BUILD)/benchmark
-	./$(BUILD)/bench_app
 
 # engine microbenchmark: links the matching engine directly, no networking
 $(BUILD)/benchmark: bench/benchmark.cpp $(LIB_OBJS) | $(BUILD)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $< $(LIB_OBJS) -o $@ $(LDFLAGS)
-
-# whole-app benchmark: drives the real server binary over TCP
-$(BUILD)/bench_app: bench/bench_app.cpp | $(BUILD)/orderbook $(BUILD)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -DSERVER_BIN='"$(BUILD)/orderbook"' $< -o $@ $(LDFLAGS)
 
 $(BUILD):
 	mkdir -p $(BUILD)
