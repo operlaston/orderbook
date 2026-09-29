@@ -14,7 +14,7 @@ The server is also run on its own dedicated thread. It handles all the network I
 This project also includes a very basic client command line application to interact with the server which I mostly used for testing.
 
 ## Dependencies
-GNU make and gcc (that supports at least up to c++20) are required to build this application.
+GNU make and gcc (that supports at least up to c++20) are required to build this application. GoogleTest is required to run tests.
 
 ## Build, Run, Test, and Benchmark
 Run `make` from the project's root directory to build.
@@ -23,9 +23,10 @@ Run `make` from the project's root directory to build.
 The orderbook and client binaries are available in `build/release/` as `orderbook` and `client` respectively.
 <br>
 <br>
-To run tests, run `make test`.
+To run tests, run `make test`
 <br>
-To run benchmarks, run `make bench`.
+<br>
+To run benchmarks, run `make bench`
 
 # Communication Protocol
 This is a basic protocol I came up with on top of TCP.
