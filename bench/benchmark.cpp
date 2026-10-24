@@ -15,7 +15,7 @@ int main() {
   std::uniform_int_distribution<int> quantityDist(1, 1000);
   std::uniform_int_distribution<int> sideDist(0, 1);
 
-  const size_t NUM_OPS = 1000000;
+  const size_t NUM_OPS = 2000000;
 
   std::vector<Price> prices(NUM_OPS);
   std::vector<Quantity> quantities(NUM_OPS);

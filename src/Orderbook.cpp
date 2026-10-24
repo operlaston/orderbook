@@ -243,7 +243,8 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
 }
 
 bool Orderbook::removeOrder(OrderId orderId) {
-  if (!m_activeOrders.contains(orderId)) {
+  auto activeOrdersIt = m_activeOrders.find(orderId);
+  if (activeOrdersIt == m_activeOrders.end()) {
     // order does not exist
     std::cout << "Error while cancelling order.\norderId: " << orderId
               << " doesn't exist" << std::endl;
@@ -251,19 +252,21 @@ bool Orderbook::removeOrder(OrderId orderId) {
   }
 
   // remove the order from its queue and the activeOrders map
-  auto it = m_activeOrders[orderId];
+  auto it = activeOrdersIt->second;
   Order order = *it;
   if (order.getSide() == Side::BUY) {
-    m_bids[order.getPrice()].erase(it);
+    auto levelIt = m_bids.find(order.getPrice());
+    levelIt->second.erase(it);
     // if the list for the price level is empty, then erase the entry list
-    if (m_bids[order.getPrice()].empty()) {
-      m_bids.erase(order.getPrice());
+    if (levelIt->second.empty()) {
+      m_bids.erase(levelIt);
     }
   } else if (order.getSide() == Side::SELL) {
-    m_asks[order.getPrice()].erase(it);
+    auto levelIt = m_asks.find(order.getPrice());
+    levelIt->second.erase(it);
     // if the list for the price level is empty, then erase the entry list
-    if (m_asks[order.getPrice()].empty()) {
-      m_asks.erase(order.getPrice());
+    if (levelIt->second.empty()) {
+      m_asks.erase(levelIt);
     }
   }
   m_activeOrders.erase(orderId);
