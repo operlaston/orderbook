@@ -1,12 +1,11 @@
 #pragma once
 
-#include <RequestTypes.h>
-#include <ResponseTypes.h>
 #include <SpscQueue.h>
 #include <cerrno>
 #include <sys/eventfd.h>
 #include <system_error>
 #include <unistd.h>
+#include <Utils.h>
 
 struct ServerEngineContext {
   alignas(CACHE_LINE_SIZE) SpscQueue<ClientRequest, 65536> incomingRequests;

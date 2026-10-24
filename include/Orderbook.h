@@ -1,31 +1,27 @@
 #pragma once
 
-#include "ResponseTypes.h"
-#include <BookSide.h>
 #include <Order.h>
 #include <ServerEngineContext.h>
 #include <Trade.h>
 #include <Utils.h>
 #include <functional>
 #include <list>
+#include <map>
 
 using PriceLevel = std::list<Order>;
+using Orders = std::unordered_map<OrderId, PriceLevel::iterator>;
 
 class Orderbook {
 private:
-  BookSide<std::greater<Price>> m_bids;
-  BookSide<std::less<Price>> m_asks;
-  std::unordered_map<OrderId, PriceLevel::iterator> m_activeOrders;
+  std::map<Price, PriceLevel, std::greater<Price>> m_bids;
+  std::map<Price, PriceLevel> m_asks;
+  Orders m_activeOrders;
   std::vector<Trade> m_trades;
   OrderId m_currId = 0; // this is 1 on the first trade
   ServerEngineContext &m_ctx;
   Quantity matchOrder(const Order &incomingOrder);
   bool canFill(const Order &incomingOrder);
   bool removeOrder(OrderId orderId);
-
-  template <typename Compare>
-  Quantity matchAgainst(BookSide<Compare> &restingBook,
-                        const Order &incomingOrder, const bool doFill);
 
 public:
   // Orderbook();
@@ -39,10 +35,10 @@ public:
   void printOrderbook();
   void printTrades();
   const std::vector<Trade> &getTrades() const { return m_trades; }
-  const BookSide<std::greater<Price>> &getBids() const { return m_bids; }
-  const BookSide<std::less<Price>> &getAsks() const { return m_asks; }
-  const std::unordered_map<OrderId, PriceLevel::iterator> &getActiveOrders() {
-    return m_activeOrders;
+  const std::map<Price, PriceLevel, std::greater<Price>> &getBids() const {
+    return m_bids;
   }
+  const std::map<Price, PriceLevel> &getAsks() const { return m_asks; }
+  const Orders& getActiveOrders() const { return m_activeOrders; }
   void run();
 };

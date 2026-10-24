@@ -1,5 +1,4 @@
 #pragma once
-#include "ResponseTypes.h"
 #include "ServerEngineContext.h"
 #include <Session.h>
 #include <cstdint>

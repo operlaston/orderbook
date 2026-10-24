@@ -1,8 +1,4 @@
-#include <MessageType.h>
-#include <OrderType.h>
 #include <OrderbookClient.h>
-#include <Side.h>
-#include <TimeInForce.h>
 #include <Utils.h>
 #include <arpa/inet.h>
 #include <cstring>

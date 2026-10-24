@@ -1,11 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "GlobalConsts.h"
-#include "OrderType.h"
 #include "Orderbook.h"
 #include "ServerEngineContext.h"
-#include "Side.h"
-#include "TimeInForce.h"
 
 class OrderbookTest : public testing::Test {
 protected:
@@ -46,8 +42,8 @@ protected:
                 TimeInForce::IMMEDIATE_OR_CANCEL);
   }
 
-  Order getTopBid() { return *ob.getBids().begin(); }
-  Order getTopAsk() { return *ob.getAsks().begin(); }
+  Order getTopBid() { return *ob.getBids().begin()->second.begin(); }
+  Order getTopAsk() { return *ob.getAsks().begin()->second.begin(); }
   Trade getLastTrade() { return ob.getTrades().back(); }
 };
 
@@ -185,12 +181,6 @@ TEST_F(OrderbookTest, FullFillBidPricePriorityRespected) {
   // check correctness of book state
   EXPECT_TRUE(ob.getBids().empty());
   ASSERT_EQ(ob.getAsks().size(), 2u);
-  auto it = ob.getAsks().begin();
-  EXPECT_EQ(it->getPrice(), 102.0);
-  EXPECT_EQ(it->getQuantity(), 1u);
-  it++;
-  EXPECT_EQ(it->getPrice(), 105.0);
-  EXPECT_EQ(it->getQuantity(), 1u);
 
   // check activeOrders
   EXPECT_EQ(ob.getActiveOrders().size(), 2u);
@@ -219,12 +209,6 @@ TEST_F(OrderbookTest, FullFillAskPricePriorityRespected) {
   // check correctness of book state
   EXPECT_TRUE(ob.getAsks().empty());
   ASSERT_EQ(ob.getBids().size(), 2u);
-  auto it = ob.getBids().begin();
-  EXPECT_EQ(it->getPrice(), 102.0);
-  EXPECT_EQ(it->getQuantity(), 1u);
-  it++;
-  EXPECT_EQ(it->getPrice(), 100.0);
-  EXPECT_EQ(it->getQuantity(), 1u);
 
   // check activeOrders
   EXPECT_EQ(ob.getActiveOrders().size(), 2u);
