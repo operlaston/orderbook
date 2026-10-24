@@ -199,7 +199,8 @@ void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
 }
 
 bool Orderbook::removeOrder(OrderId orderId) {
-  if (!m_activeOrders.contains(orderId)) {
+  auto activeOrdersIt = m_activeOrders.find(orderId);
+  if (activeOrdersIt == m_activeOrders.end()) {
     // order does not exist
     if constexpr (kDebug) {
       std::cerr << "Error while cancelling order.\norderId: " << orderId
@@ -209,7 +210,7 @@ bool Orderbook::removeOrder(OrderId orderId) {
   }
 
   // remove the order from its queue and the activeOrders map
-  auto it = m_activeOrders[orderId];
+  auto it = activeOrdersIt->second;
   Order order = *it;
   if (order.getSide() == Side::BUY) {
     m_bids.erase(it, m_activeOrders);
