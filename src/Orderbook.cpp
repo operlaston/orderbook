@@ -2,7 +2,15 @@
 #include <Orderbook.h>
 
 Orderbook::Orderbook() :
-  m_bids(MAX_PRICE + 1), m_asks(MAX_PRICE + 1) {}
+  m_bids(MAX_PRICE + 1),
+  m_asks(MAX_PRICE + 1),
+  m_bidsBitset(MAX_PRICE + 1),
+  m_asksBitset(MAX_PRICE + 1),
+  m_bestBidPrice(0),
+  m_bestAskPrice(0),
+  m_numBids(0),
+  m_numAsks(0)
+{}
 
 void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
   Order order{m_currId, quantity, price, side};
@@ -15,46 +23,75 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
   // increm id once we know there's no errors with the input
   m_currId++;
 
+  // check opposing asks on bid order
   if (order.getSide() == Side::Bid) {
-    for (Price i = 1; i <= order.getPrice(); i++) {
-      if (order.getQuantity() == 0) {
+    while (order.getQuantity() > 0 && m_numAsks > 0) {
+      Order& bestAsk = m_asks[m_bestAskPrice].front();
+      if (bestAsk.getPrice() > order.getPrice()) {
         break;
       }
-      while (!m_asks[i].empty() && order.getQuantity() > 0) {
-        auto firstAsk = m_asks[i].begin();
-        Quantity reduceQuantity = std::min(order.getQuantity(), firstAsk->getQuantity());
-        order.setQuantity(order.getQuantity() - reduceQuantity);
-        if (firstAsk->getQuantity() == reduceQuantity) {
-          m_asks[i].erase(m_asks[i].begin());
+      Quantity reduceQuantity = std::min(order.getQuantity(), bestAsk.getQuantity());
+      order.setQuantity(order.getQuantity() - reduceQuantity);
+      if (bestAsk.getQuantity() == reduceQuantity) {
+        m_asks[m_bestAskPrice].erase(m_asks[m_bestAskPrice].begin());
+        m_numAsks--;
+      }
+      else {
+        bestAsk.setQuantity(bestAsk.getQuantity() - reduceQuantity);
+      }
+
+      if (m_asks[m_bestAskPrice].empty()) {
+        if (m_numAsks > 0) {
+          m_bestAskPrice = m_asksBitset.unsetAndGetNext(m_bestAskPrice);
         }
         else {
-          firstAsk->setQuantity(firstAsk->getQuantity() - reduceQuantity);
+          m_asksBitset.unset(m_bestAskPrice);
         }
       }
     }
     if (order.getQuantity() > 0) {
       m_bids[order.getPrice()].push_back(order);
+      if (m_numBids == 0 || m_bestBidPrice < order.getPrice()) {
+        m_bestBidPrice = order.getPrice();
+      }
+      m_numBids++;
+      m_bidsBitset.set(order.getPrice());
     }
   }
+
+  // check opposing bids on ask order
   else if (order.getSide() == Side::Ask) {
-    for (Price i = MAX_PRICE; i >= order.getPrice(); i--) {
-      if (order.getQuantity() == 0) {
+    while (order.getQuantity() > 0 && m_numBids > 0) {
+      Order& bestBid = m_bids[m_bestBidPrice].front();
+      if (bestBid.getPrice() < order.getPrice()) {
         break;
       }
-      while (!m_bids[i].empty() && order.getQuantity() > 0) {
-        auto firstBid = m_bids[i].begin();
-        Quantity reduceQuantity = std::min(order.getQuantity(), firstBid->getQuantity());
-        order.setQuantity(order.getQuantity() - reduceQuantity);
-        if (firstBid->getQuantity() == reduceQuantity) {
-          m_bids[i].erase(m_bids[i].begin());
+      Quantity reduceQuantity = std::min(order.getQuantity(), bestBid.getQuantity());
+      order.setQuantity(order.getQuantity() - reduceQuantity);
+      if (bestBid.getQuantity() == reduceQuantity) {
+        m_bids[m_bestBidPrice].erase(m_bids[m_bestBidPrice].begin());
+        m_numBids--;
+      }
+      else {
+        bestBid.setQuantity(bestBid.getQuantity() - reduceQuantity);
+      }
+
+      if (m_bids[m_bestBidPrice].empty()) {
+        if (m_numBids > 0) {
+          m_bestBidPrice = m_bidsBitset.unsetAndGetPrev(m_bestBidPrice);
         }
         else {
-          firstBid->setQuantity(firstBid->getQuantity() - reduceQuantity);
+          m_bidsBitset.unset(m_bestBidPrice);
         }
       }
     }
     if (order.getQuantity() > 0) {
       m_asks[order.getPrice()].push_back(order);
+      if (m_numAsks == 0 || m_bestAskPrice > order.getPrice()) {
+        m_bestAskPrice = order.getPrice();
+      }
+      m_numAsks++;
+      m_asksBitset.set(order.getPrice());
     }
   }
 }
