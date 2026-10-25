@@ -1,9 +1,11 @@
 #include "Utils.h"
 #include <Orderbook.h>
 
-Orderbook::Orderbook() :
-  m_bids(MAX_PRICE + 1),
-  m_asks(MAX_PRICE + 1),
+Orderbook::Orderbook(uint64_t blockCount) :
+  m_memPool(blockCount, CACHE_LINE_SIZE), // allocate a buffer to hold blockCount Order objects on the heap
+  m_allocator(m_memPool),
+  m_bids(MAX_PRICE + 1, Level(m_allocator)),
+  m_asks(MAX_PRICE + 1, Level(m_allocator)),
   m_bidsBitset(MAX_PRICE + 1),
   m_asksBitset(MAX_PRICE + 1),
   m_bestBidPrice(0),

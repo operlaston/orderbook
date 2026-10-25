@@ -6,14 +6,14 @@
 #include <vector>
 
 int main() {
-  Orderbook ob;
+  Orderbook ob(10'000'000);
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<uint64_t> priceDist(1, 10000);
   std::uniform_int_distribution<uint64_t> quantityDist(1, 10000);
   std::uniform_int_distribution<uint8_t> sideDist(0, 1);
 
-  const size_t NUM_OPS = 10000000;
+  const size_t NUM_OPS = 10'000'000;
 
   std::vector<Price> prices(NUM_OPS);
   std::vector<Quantity> quantities(NUM_OPS);

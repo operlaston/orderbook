@@ -8,7 +8,7 @@ class OrderbookTest : public testing::Test {
 protected:
   Orderbook ob;
 
-  OrderbookTest() {}
+  OrderbookTest() : ob(10) {}
   ~OrderbookTest() override = default;
 
   void bid(Price price, Quantity quantity) {
