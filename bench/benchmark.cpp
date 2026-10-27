@@ -10,7 +10,7 @@ int main() {
   Orderbook ob(10'000'000, 10'000'000);
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_int_distribution<uint64_t> priceDist(1, 100);
+  std::uniform_int_distribution<uint64_t> priceDist(1, 10000);
   std::uniform_int_distribution<uint64_t> quantityDist(1, 10000);
   std::uniform_int_distribution<uint8_t> sideDist(0, 1);
 
