@@ -1,11 +1,14 @@
 #include "Utils.h"
 #include <Orderbook.h>
+#include <optional>
 
-Orderbook::Orderbook(uint64_t blockCount) :
+Orderbook::Orderbook(uint64_t blockCount, uint32_t initialOrderMax) :
   m_memPool(blockCount, CACHE_LINE_SIZE), // allocate a buffer to hold blockCount Order objects on the heap
   m_allocator(m_memPool),
   m_bids(MAX_PRICE + 1, Level(m_allocator)),
   m_asks(MAX_PRICE + 1, Level(m_allocator)),
+  m_initialOrderMax(initialOrderMax),
+  m_idToOrderPtr(initialOrderMax + 1, std::nullopt), // +1 because we start at id 1
   m_bidsBitset(MAX_PRICE + 1),
   m_asksBitset(MAX_PRICE + 1),
   m_bestBidPrice(0),
@@ -22,78 +25,121 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
     return;
   }
 
-  // increm id once we know there's no errors with the input
-  m_currId++;
-
   // check opposing asks on bid order
   if (order.getSide() == Side::Bid) {
     while (order.getQuantity() > 0 && m_numAsks > 0) {
-      Order& bestAsk = m_asks[m_bestAskPrice].front();
+      Level::iterator bestAskIt = m_asks[m_bestAskPrice].begin();
+      Order& bestAsk = *bestAskIt;
       if (bestAsk.getPrice() > order.getPrice()) {
         break;
       }
       Quantity reduceQuantity = std::min(order.getQuantity(), bestAsk.getQuantity());
       order.setQuantity(order.getQuantity() - reduceQuantity);
       if (bestAsk.getQuantity() == reduceQuantity) {
-        m_asks[m_bestAskPrice].erase(m_asks[m_bestAskPrice].begin());
-        m_numAsks--;
+        eraseOrder(bestAskIt);
       }
       else {
         bestAsk.setQuantity(bestAsk.getQuantity() - reduceQuantity);
       }
-
-      if (m_asks[m_bestAskPrice].empty()) {
-        if (m_numAsks > 0) {
-          m_bestAskPrice = m_asksBitset.unsetAndGetNext(m_bestAskPrice);
-        }
-        else {
-          m_asksBitset.unset(m_bestAskPrice);
-        }
-      }
-    }
-    if (order.getQuantity() > 0) {
-      m_bids[order.getPrice()].push_back(order);
-      if (m_numBids == 0 || m_bestBidPrice < order.getPrice()) {
-        m_bestBidPrice = order.getPrice();
-      }
-      m_numBids++;
-      m_bidsBitset.set(order.getPrice());
     }
   }
 
   // check opposing bids on ask order
   else if (order.getSide() == Side::Ask) {
     while (order.getQuantity() > 0 && m_numBids > 0) {
-      Order& bestBid = m_bids[m_bestBidPrice].front();
+      Level::iterator bestBidIt = m_bids[m_bestBidPrice].begin();
+      Order& bestBid = *bestBidIt;
       if (bestBid.getPrice() < order.getPrice()) {
         break;
       }
       Quantity reduceQuantity = std::min(order.getQuantity(), bestBid.getQuantity());
       order.setQuantity(order.getQuantity() - reduceQuantity);
       if (bestBid.getQuantity() == reduceQuantity) {
-        m_bids[m_bestBidPrice].erase(m_bids[m_bestBidPrice].begin());
-        m_numBids--;
+        eraseOrder(bestBidIt);
       }
       else {
         bestBid.setQuantity(bestBid.getQuantity() - reduceQuantity);
       }
+    }
+  }
 
-      if (m_bids[m_bestBidPrice].empty()) {
-        if (m_numBids > 0) {
-          m_bestBidPrice = m_bidsBitset.unsetAndGetPrev(m_bestBidPrice);
-        }
-        else {
-          m_bidsBitset.unset(m_bestBidPrice);
-        }
+  // if there is any remaining quantity, the order must rest
+  if (order.getQuantity() > 0) {
+    restOrder(order);
+  }
+}
+
+bool Orderbook::cancelOrder(OrderId orderId) {
+  std::optional<Level::iterator> levelItOpt = m_idToOrderPtr[orderId];
+  if (!levelItOpt.has_value()) {
+    std::cout << "couldn't cancel because given order id doesn't exist" << std::endl;
+    return false;
+  }
+  auto levelIt = *levelItOpt;
+  eraseOrder(levelIt);
+  m_idToOrderPtr[orderId] = std::nullopt;
+  return true;
+}
+
+void Orderbook::restOrder(const Order& order) {
+  bool isBid = order.getSide() == Side::Bid;
+
+  Level &pl = isBid ? m_bids[order.getPrice()] : m_asks[order.getPrice()];
+  Level::iterator levelIt = pl.insert(pl.end(), order);
+  if (order.getId() < m_initialOrderMax) {
+    m_idToOrderPtr[order.getId()] = levelIt;
+  }
+  else {
+    // fallback to push_back when we have run out of space
+    m_idToOrderPtr.push_back(levelIt);
+  }
+
+  if (isBid) {
+    if (m_numBids == 0 || m_bestBidPrice < order.getPrice()) {
+      m_bestBidPrice = order.getPrice();
+    }
+    m_numBids++;
+    m_bidsBitset.set(order.getPrice());
+  }
+  else {
+    if (m_numAsks == 0 || m_bestAskPrice > order.getPrice()) {
+      m_bestAskPrice = order.getPrice();
+    }
+    m_numAsks++;
+    m_asksBitset.set(order.getPrice());
+  }
+
+  // we increment the global id counter only after resting an order 
+  m_currId++;
+}
+
+void Orderbook::eraseOrder(Level::iterator orderIt) {
+  const Order& order = *orderIt;
+  m_idToOrderPtr[order.getId()] = std::nullopt;
+  if (order.getSide() == Side::Bid) {
+    m_bids[m_bestBidPrice].erase(orderIt);
+    m_numBids--;
+
+    if (m_bids[m_bestBidPrice].empty()) {
+      if (m_numBids > 0) {
+        m_bestBidPrice = m_bidsBitset.unsetAndGetPrev(m_bestBidPrice);
+      }
+      else {
+        m_bidsBitset.unset(m_bestBidPrice);
       }
     }
-    if (order.getQuantity() > 0) {
-      m_asks[order.getPrice()].push_back(order);
-      if (m_numAsks == 0 || m_bestAskPrice > order.getPrice()) {
-        m_bestAskPrice = order.getPrice();
+  }
+  else {
+    m_asks[m_bestAskPrice].erase(orderIt);
+    m_numAsks--;
+
+    if (m_asks[m_bestAskPrice].empty()) {
+      if (m_numAsks > 0) {
+        m_bestAskPrice = m_asksBitset.unsetAndGetNext(m_bestAskPrice);
       }
-      m_numAsks++;
-      m_asksBitset.set(order.getPrice());
+      else {
+        m_asksBitset.unset(m_bestAskPrice);
+      }
     }
   }
 }

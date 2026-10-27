@@ -8,7 +8,7 @@ class OrderbookTest : public testing::Test {
 protected:
   Orderbook ob;
 
-  OrderbookTest() : ob(10) {}
+  OrderbookTest() : ob(10, 10) {}
   ~OrderbookTest() override = default;
 
   void bid(Price price, Quantity quantity) {
@@ -33,6 +33,10 @@ protected:
 
   size_t numAsksAtLevel(Price price) {
     return ob.getAsks()[price].size();
+  }
+
+  std::optional<Level::iterator> getOrderIter(OrderId orderId) {
+    return ob.getIdMap()[orderId];
   }
 };
 
@@ -116,4 +120,29 @@ TEST_F(OrderbookTest, AskFillsMultiple) {
   ASSERT_EQ(numBidsAtLevel(108), 0u);
   ASSERT_EQ(numAsksAtLevel(100), 1u);
   ASSERT_EQ(askLevelTop(100).getQuantity(), 5);
+}
+
+TEST_F(OrderbookTest, BidCanBeCancelled) {
+  bid(100, 10);
+  ASSERT_NE(getOrderIter(1), std::nullopt);
+
+  bool res = ob.cancelOrder(1);
+  ASSERT_TRUE(res);
+  ASSERT_EQ(getOrderIter(1), std::nullopt);
+}
+
+TEST_F(OrderbookTest, AskCanBeCancelled) {
+  ask(100, 10);
+  ASSERT_NE(getOrderIter(1), std::nullopt);
+
+  bool res = ob.cancelOrder(1);
+  ASSERT_TRUE(res);
+  ASSERT_EQ(getOrderIter(1), std::nullopt);
+}
+
+TEST_F(OrderbookTest, CannotCancelBadId) {
+  bid(100, 10);
+
+  bool res = ob.cancelOrder(2);
+  ASSERT_FALSE(res);
 }
