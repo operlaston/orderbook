@@ -114,31 +114,31 @@ void Orderbook::restOrder(const Order& order) {
 }
 
 void Orderbook::eraseOrder(Level::iterator orderIt) {
-  const Order& order = *orderIt;
+  const Order order = *orderIt;
   m_idToOrderPtr[order.getId()] = std::nullopt;
   if (order.getSide() == Side::Bid) {
-    m_bids[m_bestBidPrice].erase(orderIt);
+    m_bids[order.getPrice()].erase(orderIt);
     m_numBids--;
 
-    if (m_bids[m_bestBidPrice].empty()) {
-      if (m_numBids > 0) {
+    if (m_bids[order.getPrice()].empty()) {
+      if (order.getPrice() == m_bestBidPrice && m_numBids > 0) {
         m_bestBidPrice = m_bidsBitset.unsetAndGetPrev(m_bestBidPrice);
       }
       else {
-        m_bidsBitset.unset(m_bestBidPrice);
+        m_bidsBitset.unset(order.getPrice());
       }
     }
   }
   else {
-    m_asks[m_bestAskPrice].erase(orderIt);
+    m_asks[order.getPrice()].erase(orderIt);
     m_numAsks--;
 
-    if (m_asks[m_bestAskPrice].empty()) {
-      if (m_numAsks > 0) {
+    if (m_asks[order.getPrice()].empty()) {
+      if (order.getPrice() == m_bestAskPrice && m_numAsks > 0) {
         m_bestAskPrice = m_asksBitset.unsetAndGetNext(m_bestAskPrice);
       }
       else {
-        m_asksBitset.unset(m_bestAskPrice);
+        m_asksBitset.unset(order.getPrice());
       }
     }
   }

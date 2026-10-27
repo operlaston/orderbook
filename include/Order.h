@@ -7,8 +7,8 @@ class Order {
 private:
   OrderId m_id;
   Quantity m_quantity;
-  // Timestamp m_timestamp;
   Price m_price;
+  // Timestamp m_timestamp;
   Side m_side;
 
 public:

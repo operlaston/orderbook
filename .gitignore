@@ -3,3 +3,4 @@ orderbook
 build/
 .clang-format
 *.o
+perf*

@@ -5,8 +5,8 @@
 #include <cstdint>
 
 using OrderId = uint64_t;
-using Price = uint32_t;
 using Quantity = uint64_t;
+using Price = uint32_t;
 using Timestamp = uint64_t;
 
 template <class... Ts> struct overload : Ts... {
