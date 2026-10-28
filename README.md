@@ -1,129 +1,155 @@
 # Orderbook
 
-## Background
+A limit order book and matching engine in C++20, served over a small binary TCP
+protocol.
 
-An orderbook built in C++ to support market and limit orders. It also implements the FillOrKill, ImmediateOrCancel, and GoodTilCancel TIF order types.
+Every order is a limit order that rests until it is filled or cancelled
+(good-til-cancel). Incoming orders match against the opposite side by price,
+then by time (oldest first within a price level), and fill at the resting
+order's price.
 
 ## Engine
-The engine runs on its own dedicated thread and is responsible for matching orders and keeping track of bids and asks. It spins in a busy loop (and should be pinned to a single core while doing so) waiting for requests to be made available to it through a single producer single consumer lock-free queue. Upon popping a request off the queue, it processes the request and sends a response back through a different spsc queue.
+
+The engine (`src/Orderbook.cpp`) is single-threaded and keeps the hot path free
+of hashing and tree lookups:
+
+- **Flat price levels.** Each side is a `std::vector` with one `std::list` of
+  orders per price, indexed directly by price (`1..MAX_PRICE`, currently
+  100000).
+- **Price bitsets.** Each side has a bitset with one bit per price, set while
+  that level has orders. When the best level empties, the next best price is
+  found by scanning 64 prices per word with `ctz`/`clz`.
+- **Pool allocator.** List nodes come from a preallocated, cache-line-aligned
+  block pool (`FixedPool` / `BlockAllocator`). It falls back to the heap once
+  the pool is used up.
+- **Flat id map.** Order ids are handed out in sequence, and only to orders that
+  rest. A `std::vector` indexed by id holds each resting order's list iterator,
+  so cancel and modify are O(1).
+
+The engine runs on its own thread (`src/Engine.cpp`). It busy-polls a lock-free
+single-producer single-consumer queue for requests and pushes each response to
+a second SPSC queue. It then wakes the server through an `eventfd`.
 
 ## Server
-The server is also run on its own dedicated thread. It handles all the network I/O. It uses epoll to implement an async event loop. For each client, an instance of a Session is created (which manages the underlying file descriptor and closes it upon destruction). Upon receiving a request, it forwards it to the matching engine so it can move on to parse other requests while the engine works on fulfilling the request. Once the matching engine wants to send a response, it will make the response available via the outbound spsc queue and write to an event file descriptor (created using eventfd), which is in the server's epoll interest list. This allows the server to be made aware that a response is ready to be sent back to a client.
+
+The server (`src/Server.cpp`) runs on its own thread with an `epoll` event
+loop. Each client gets a `Session` that owns the socket and a receive buffer,
+so messages split across TCP reads, or several messages in one read, are
+handled. Requests are forwarded to the engine. When the engine signals the
+`eventfd`, the server sends the queued responses back to their clients.
+Responses to a client always come back in the order of its requests.
+
+If a client stops reading and its socket buffer fills, or the connection
+breaks, the server disconnects it.
 
 ## Client
-This project also includes a very basic client command line application to interact with the server which I mostly used for testing.
 
-## Dependencies
-GNU make and gcc (that supports at least up to c++20) are required to build this application. GoogleTest is required to run tests.
+`client` is a small interactive command-line client, mostly for manual testing.
+`include/OrderbookClient.h` can also be used as a blocking client library.
 
-## Build, Run, Test, and Benchmark
-Run `make` from the project's root directory to build.
-<br>
-<br>
-The orderbook and client binaries are available in `build/release/` as `orderbook` and `client` respectively.
-<br>
-<br>
-To run tests, run `make test`
-<br>
-<br>
-To run benchmarks, run `make bench`
+## Build, run, test, benchmark
+
+Requires CMake 3.16+, a C++20 compiler (GCC 13 tested), and GoogleTest.
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+```
+
+This builds four binaries in `build/`:
+
+| Binary | What it is |
+| :--- | :--- |
+| `orderbook [port]` | the server and engine (default port 8080) |
+| `client [port]` | interactive client |
+| `tests` | unit tests, plus a randomized test against a reference book |
+| `bench` | engine microbenchmark (add, modify, cancel) |
+
+```sh
+./build/orderbook        # in one terminal
+./build/client           # in another
+./build/tests
+./build/bench            # use a Release build
+```
+
+To run the tests with AddressSanitizer and UBSan:
+
+```sh
+cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DORDERBOOK_SANITIZE=ON
+cmake --build build-asan -j && ./build-asan/tests
+```
 
 # Communication Protocol
-This is a basic protocol I came up with on top of TCP.
 
-## Requests (Incoming Messages)
+A binary protocol on top of TCP. All multi-byte integers are **big-endian**,
+with no padding. Each request gets exactly one response, and responses arrive
+in request order.
 
-Incoming messages communicate the fundamental attributes of a trade request, including `Side`, `OrderType`, `Price`, `Quantity`, and `TimeInForce`.
+## Requests (client → server)
 
-### Message Structures
+The first byte of every request is its `MessageType`, which fixes the
+message's length.
 
-#### New Order Message
-**Total Size: 20 bytes**
+#### New Order — 14 bytes
 
-| Field | Size (Bytes) | Description |
+| Field | Size (bytes) | Description |
 | :--- | :--- | :--- |
-| `MessageType` | 1 | Identifies the message as a New Order |
-| `Side` | 1 | Indicates whether it is a Buy or Sell |
-| `OrderType` | 1 | Indicates whether it is a Limit or Market order |
-| `TimeInForce` | 1 | Specifies how long the order remains active |
-| `Price` | 8 | The requested order price<br>*<i><b>This value MUST be passed in as</b></i> `0` <i><b>on market orders or else the request will be rejected</b></i> |
-| `Quantity` | 8 | The requested number of units |
+| `MessageType` | 1 | `0` |
+| `Side` | 1 | `0` = BUY, `1` = SELL |
+| `Price` | 4 | unsigned, `1..100000` |
+| `Quantity` | 8 | unsigned, greater than 0 |
 
-#### Cancel Order Message
-**Total Size: 9 bytes**
+#### Cancel Order — 9 bytes
 
-| Field | Size (Bytes) | Description |
+| Field | Size (bytes) | Description |
 | :--- | :--- | :--- |
-| `MessageType` | 1 | Identifies the message as a Cancel Order |
-| `OrderId` | 8 | The unique identifier of the order to be canceled |
+| `MessageType` | 1 | `1` |
+| `OrderId` | 8 | id of the resting order to cancel |
 
-#### Modify Order Message
-**Total Size: 17 bytes**
+#### Modify Order — 17 bytes
 
-| Field | Size (Bytes) | Description |
+| Field | Size (bytes) | Description |
 | :--- | :--- | :--- |
-| `MessageType` | 1 | Identifies the message as a Modify Order |
-| `OrderId` | 8 | The unique identifier of the order to be modified |
-| `NewQuantity`| 8 | The updated quantity for the order |
+| `MessageType` | 1 | `2` |
+| `OrderId` | 8 | id of the resting order to modify |
+| `NewQuantity` | 8 | new remaining quantity |
 
-### Field Enumerations
+Modify can only lower an order's quantity (or leave it unchanged), and the
+order keeps its place in the queue. A new quantity of 0, or one above the
+order's remaining quantity, is rejected. Use cancel to remove an order.
 
-**Message Types**
-* `0` = New Order
-* `1` = Cancel Order
-* `2` = Modify Order
+## Responses (server → client)
 
-**Sides**
-* `0` = BUY
-* `1` = SELL
+#### New Order Response — 9 bytes
 
-**Order Types**
-* `0` = LIMIT
-* `1` = MARKET
-
-**Time In Force**
-* `0` = NONE - this option <b>MUST</b> be used for market orders and <b>MUST NOT</b> be used for limit orders or else BAD_REQUEST will be returned
-* `1` = GOODTILCANCEL (GTC)
-* `2` = IMMEDIATE OR CANCEL (IOC)
-* `3` = FILL OR KILL (FOK)
-
----
-
-## Responses (Outgoing Messages)
-
-Outgoing messages represent the system's acknowledgement and result of the incoming requests.
-
-### Message Structures
-
-#### New Order Response
-**Total Size: 9 bytes**
-
-| Field | Size (Bytes) | Description |
+| Field | Size (bytes) | Description |
 | :--- | :--- | :--- |
-| `Status` | 1 | The outcome of the new order request |
-| `OrderId` | 8 | The generated unique identifier assigned to the new order. Note that a returned id of 0 means that the order was either filled immediately or cancelled immediately (by either FOK or IOC) |
+| `Status` | 1 | see below |
+| `OrderId` | 8 | id of the resting order, or `0` if the order filled in full on arrival or was rejected |
 
-#### Cancel Order Response
-**Total Size: 1 byte**
+The response is always 9 bytes, including when the request is rejected.
 
-| Field | Size (Bytes) | Description |
+#### Cancel Order Response — 1 byte
+
+| Field | Size (bytes) | Description |
 | :--- | :--- | :--- |
-| `Status` | 1 | The outcome of the cancel order request |
+| `Status` | 1 | see below |
 
-#### Modify Order Response
-**Total Size: 1 byte**
+#### Modify Order Response — 1 byte
 
-| Field | Size (Bytes) | Description |
+| Field | Size (bytes) | Description |
 | :--- | :--- | :--- |
-| `Status` | 1 | The outcome of the modify order request |
+| `Status` | 1 | see below |
 
-### Status Enumerations
+### Statuses
 
 * `0` = SUCCESS
-* `1` = BAD_REQUEST
-* `2` = INVALID_MESSAGE_TYPE
-* `3` = SERVER_ERROR
-* `4` = PARTIAL_FILL
-* `5` = CANT_FILL
+* `1` = BAD_REQUEST: invalid side, price or quantity, an unknown or no longer
+  resting order id, or an invalid modify
+* `2` = SERVER_ERROR
 
+### Unknown message types
 
+If a request starts with an unknown `MessageType`, the server can't tell where
+the next message begins. It sends the responses for any earlier requests, then
+a single `BAD_REQUEST` byte, then closes the connection.

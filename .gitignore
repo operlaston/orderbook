@@ -1,6 +1,6 @@
 compile_commands.json
 orderbook
-build/
+build*/
 .clang-format
 *.o
 perf*
