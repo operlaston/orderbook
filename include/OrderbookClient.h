@@ -1,209 +1,132 @@
-#include "GlobalConsts.h"
-#include <MessageType.h>
-#include <OrderType.h>
-#include <Side.h>
-#include <TimeInForce.h>
+#pragma once
+
+#include <Protocol.h>
 #include <Utils.h>
 #include <arpa/inet.h>
-#include <array>
-#include <bit>
-#include <cstring>
-#include <endian.h>
-#include <iostream>
-#include <limits>
+#include <cerrno>
+#include <cstddef>
+#include <cstdint>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <stdexcept>
 #include <sys/socket.h>
+#include <system_error>
 #include <unistd.h>
 
+// Blocking client for the orderbook server. Each request call sends one
+// message and waits for its reply.
 class OrderbookClient {
-private:
-  int m_socket;
-
 public:
-  explicit OrderbookClient(uint16_t port) {
-    struct sockaddr_in serv_addr;
-
-    if ((m_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-      perror("socket");
-      throw std::runtime_error("socket creation failed");
+  explicit OrderbookClient(uint16_t port, const char *host = "127.0.0.1") {
+    m_socket = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (m_socket == -1) {
+      throw std::system_error(errno, std::generic_category(), "socket");
     }
 
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(port);
-
-    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
-      perror("inet_pton");
-      throw std::runtime_error("inet_pton failed");
+    sockaddr_in servAddr{};
+    servAddr.sin_family = AF_INET;
+    servAddr.sin_port = htons(port);
+    if (::inet_pton(AF_INET, host, &servAddr.sin_addr) <= 0) {
+      ::close(m_socket);
+      throw std::runtime_error("invalid server address");
+    }
+    if (::connect(m_socket, reinterpret_cast<sockaddr *>(&servAddr),
+                  sizeof(servAddr)) == -1) {
+      int err = errno;
+      ::close(m_socket);
+      throw std::system_error(err, std::generic_category(), "connect");
     }
 
-    if (connect(m_socket, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) <
-        0) {
-      perror("connect");
-      throw std::runtime_error("inet_pton failed");
-    }
-
-    std::cout << "Connected to server on port " << port << std::endl;
+    int one = 1;
+    ::setsockopt(m_socket, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
   }
 
-  // delete copy and move semantics
-  OrderbookClient(const OrderbookClient &other) = delete;
-  OrderbookClient &operator=(const OrderbookClient &other) = delete;
-  OrderbookClient(OrderbookClient &&other) = delete;
-  OrderbookClient &operator=(OrderbookClient &&other) = delete;
+  OrderbookClient(const OrderbookClient &) = delete;
+  OrderbookClient &operator=(const OrderbookClient &) = delete;
+  OrderbookClient(OrderbookClient &&) = delete;
+  OrderbookClient &operator=(OrderbookClient &&) = delete;
 
   ~OrderbookClient() {
     if (m_socket != -1) {
-      close(m_socket);
-      m_socket = -1;
+      ::close(m_socket);
     }
   }
 
-  void safeWrite(const void *buf, size_t n) {
-    ssize_t bytesWritten;
-    char *pos = (char *)buf;
-    do {
-      bytesWritten = write(m_socket, pos, n);
-      if (bytesWritten == -1) {
-        if (errno == EINTR)
-          continue;
-        else {
-          ::perror("write");
-          std::abort();
-        }
-      }
-      n -= bytesWritten;
-      pos += bytesWritten;
-    } while (n > 0);
+  NewOrderResult requestNewOrder(Side side, Price price, Quantity quantity) {
+    auto msg = Protocol::encodeNewOrder(side, price, quantity);
+    writeAll(msg.data(), msg.size());
+
+    std::array<uint8_t, Protocol::NEW_ORDER_RESPONSE_SIZE> res;
+    readAll(res.data(), res.size());
+    return Protocol::decodeNewOrderResponse(res.data());
   }
 
-  void safeRead(void *buf, size_t n) {
-    ssize_t bytesRead;
-    do {
-      bytesRead = read(m_socket, buf, n);
-      if (bytesRead == -1) {
-        if (errno == EINTR)
-          continue;
-        else {
-          ::perror("read");
-          std::abort();
-        }
-      }
-      n -= bytesRead;
-      buf = (char *)buf + bytesRead;
-    } while (n > 0);
+  Status requestCancelOrder(OrderId orderId) {
+    auto msg = Protocol::encodeCancelOrder(orderId);
+    writeAll(msg.data(), msg.size());
+    return readStatus();
   }
 
-  OrderId requestNewOrder(Side side, OrderType orderType,
-                          TimeInForce timeInForce, Price price,
-                          Quantity quantity) {
-    std::array<uint8_t, 20> buf;
-    buf[0] = static_cast<uint8_t>(MessageType::NEW_ORDER);
-    buf[1] = static_cast<uint8_t>(side);
-    buf[2] = static_cast<uint8_t>(orderType);
-    buf[3] = static_cast<uint8_t>(timeInForce);
-
-    uint64_t priceRaw = std::bit_cast<uint64_t>(price);
-    priceRaw = htobe64(priceRaw);
-    uint64_t quantityRaw = htobe64(quantity);
-
-    std::memcpy(&buf[4], &priceRaw, 8);
-    std::memcpy(&buf[12], &quantityRaw, 8);
-    safeWrite(buf.data(), buf.size());
-
-    // get response
-    std::array<uint8_t, 9> responseBuf;
-    safeRead(responseBuf.data(), responseBuf.size());
-
-    printStatus(responseBuf[0]);
-
-    uint64_t newOrderIdRaw;
-    memcpy(&newOrderIdRaw, &responseBuf[1], 8);
-    OrderId newOrderId = be64toh(newOrderIdRaw);
-    if (newOrderId > 0)
-      std::cout << "\nNew Order ID is " << newOrderId << std::endl;
-    return newOrderId;
+  Status requestModifyOrder(OrderId orderId, Quantity newQuantity) {
+    auto msg = Protocol::encodeModifyOrder(orderId, newQuantity);
+    writeAll(msg.data(), msg.size());
+    return readStatus();
   }
 
-  OrderId requestMarketOrder(Side side, Quantity quantity) {
-    return requestNewOrder(side, OrderType::MARKET, TimeInForce::NONE, 0,
-                           quantity);
+  // Sends raw bytes. Useful for testing how the server handles bad input.
+  void sendRaw(const void *buf, size_t n) { writeAll(buf, n); }
+
+  Status readStatus() {
+    uint8_t status;
+    readAll(&status, 1);
+    return static_cast<Status>(status);
   }
 
-  OrderId requestLimitOrder(Side side, TimeInForce timeInForce, Price price,
-                            Quantity quantity) {
-    return requestNewOrder(side, OrderType::LIMIT, timeInForce, price,
-                           quantity);
-  }
-
-  void requestCancelOrder(OrderId orderId) {
-    std::cout << "Cancel Order " << orderId << std::endl;
-    std::array<uint8_t, 9> buf;
-    buf[0] = static_cast<uint8_t>(MessageType::CANCEL_ORDER);
-    uint64_t orderIdRaw = htobe64(orderId);
-    memcpy(&buf[1], &orderIdRaw, 8);
-    safeWrite(buf.data(), buf.size());
-
-    uint8_t res;
-    safeRead(&res, 1);
-    printStatus(res);
-  }
-
-  void requestModifyOrder(OrderId orderId, Quantity newQuantity) {
-    std::cout << "Modify Order " << orderId
-              << ". Attempt to change quantity to " << newQuantity << std::endl;
-    std::array<uint8_t, 17> buf;
-    buf[0] = static_cast<uint8_t>(MessageType::MODIFY_ORDER);
-    uint64_t orderIdRaw = htobe64(orderId);
-    uint64_t newQuantityRaw = htobe64(newQuantity);
-    memcpy(&buf[1], &orderIdRaw, 8);
-    memcpy(&buf[9], &newQuantityRaw, 8);
-    safeWrite(buf.data(), buf.size());
-
-    uint8_t res;
-    safeRead(&res, 1);
-    printStatus(res);
-  }
-
-  static int parseOption(int low, int high) {
-    int actionOption = 0;
-    bool success = false;
-    while (!success) {
-      if (!(std::cin >> actionOption)) {
-        std::cout << "Please enter a valid number from " << low << "-" << high
-                  << std::endl;
-        std::cin.clear();
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max());
-      } else if (actionOption < low || actionOption > high) {
-        std::cout << "Please enter a valid number from " << low << "-" << high
-                  << std::endl;
-      } else {
-        success = true;
-      }
-    }
-    return actionOption;
-  }
-
-  static void printStatus(uint8_t status) {
-    std::cout << std::endl;
+  static const char *statusName(Status status) {
     switch (status) {
-    case ResponseStatus::SUCCESS:
-      std::cout << "SUCCESS" << std::endl;
-      break;
-    case ResponseStatus::BAD_REQUEST:
-      std::cout << "BAD REQUEST" << std::endl;
-      break;
-    case ResponseStatus::INVALID_MESSAGE_TYPE:
-      std::cout << "INVALID MESSAGE TYPE" << std::endl;
-      break;
-    case ResponseStatus::SERVER_ERROR:
-      std::cout << "SERVER ERROR" << std::endl;
-      break;
-    case ResponseStatus::PARTIAL_FILL:
-      std::cout << "PARTIALLY FILLED ORDER" << std::endl;
-      break;
-    case ResponseStatus::CANT_FILL:
-      std::cout << "CANT FILL ORDER" << std::endl;
-      break;
+    case Status::Success:
+      return "SUCCESS";
+    case Status::BadRequest:
+      return "BAD_REQUEST";
+    case Status::ServerError:
+      return "SERVER_ERROR";
+    }
+    return "UNKNOWN_STATUS";
+  }
+
+private:
+  int m_socket = -1;
+
+  void writeAll(const void *buf, size_t n) {
+    const uint8_t *pos = static_cast<const uint8_t *>(buf);
+    while (n > 0) {
+      ssize_t written = ::send(m_socket, pos, n, MSG_NOSIGNAL);
+      if (written == -1) {
+        if (errno == EINTR) {
+          continue;
+        }
+        throw std::system_error(errno, std::generic_category(), "send");
+      }
+      pos += written;
+      n -= static_cast<size_t>(written);
+    }
+  }
+
+  void readAll(void *buf, size_t n) {
+    uint8_t *pos = static_cast<uint8_t *>(buf);
+    while (n > 0) {
+      ssize_t bytesRead = ::read(m_socket, pos, n);
+      if (bytesRead == -1) {
+        if (errno == EINTR) {
+          continue;
+        }
+        throw std::system_error(errno, std::generic_category(), "read");
+      }
+      if (bytesRead == 0) {
+        throw std::runtime_error("server closed the connection");
+      }
+      pos += bytesRead;
+      n -= static_cast<size_t>(bytesRead);
     }
   }
 };

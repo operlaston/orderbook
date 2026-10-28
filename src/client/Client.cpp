@@ -1,108 +1,82 @@
-#include <MessageType.h>
-#include <OrderType.h>
 #include <OrderbookClient.h>
-#include <Side.h>
-#include <TimeInForce.h>
 #include <Utils.h>
-#include <arpa/inet.h>
-#include <cstring>
-#include <endian.h>
+#include <cstdint>
+#include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <limits>
-#include <sys/socket.h>
-#include <unistd.h>
+#include <optional>
+#include <string>
 
-int main() {
-  OrderbookClient client{8080};
+namespace {
 
+// Reads an unsigned number in [low, high], asking again on bad input. Exits on
+// end of input.
+uint64_t readNumber(const std::string &prompt, uint64_t low, uint64_t high) {
   while (true) {
-    std::string actionsText = "\n=======Actions=======\n"
-                              "(1) New Order\n"
-                              "(2) Cancel Order\n"
-                              "(3) Modify Order\n";
-
-    std::cout << actionsText << std::endl;
-
-    int actionOption = OrderbookClient::parseOption(1, 3);
-
-    if (actionOption == 1) { // New Order
-      std::string sidePrompt = "\n=======Side=======\n"
-                               "(1) Buy\n"
-                               "(2) Sell\n";
-      std::string orderTypePrompt = "\n=======Order Type=======\n"
-                                    "(1) Limit\n"
-                                    "(2) Market\n";
-      std::string timeInForcePrompt = "\n=======Time In Force=======\n"
-                                      "(1) None\n"
-                                      "(2) Good Til Cancel\n"
-                                      "(3) Immediate Or Cancel\n"
-                                      "(4) Fill Or Kill\n";
-      std::string pricePrompt = "\nPrice: ";
-      std::string quantityPrompt = "\nQuantity: ";
-
-      std::cout << sidePrompt << std::endl;
-      int sideRaw = OrderbookClient::parseOption(1, 2);
-      sideRaw--;
-      Side side = static_cast<Side>(sideRaw);
-
-      std::cout << quantityPrompt;
-      Quantity quantity = 0;
-      std::cin >> quantity;
-
-      std::cout << orderTypePrompt << std::endl;
-      int orderTypeRaw = OrderbookClient::parseOption(1, 2);
-      orderTypeRaw--;
-      OrderType orderType = static_cast<OrderType>(orderTypeRaw);
-
-      if (orderType == OrderType::MARKET) {
-        client.requestMarketOrder(side, quantity);
-        continue;
-      }
-
-      std::cout << pricePrompt;
-      Price price = 0;
-      std::cin >> price;
-
-      std::cout << timeInForcePrompt << std::endl;
-      int timeInForceRaw = OrderbookClient::parseOption(1, 4);
-      timeInForceRaw--;
-      TimeInForce timeInForce = static_cast<TimeInForce>(timeInForceRaw);
-
-      client.requestLimitOrder(side, timeInForce, price, quantity);
-
-    } else if (actionOption == 2) { // Cancel Order
-      OrderId orderId = 0;
-      std::cout << "\nOrder Id: ";
-      if (!(std::cin >> orderId)) {
-        std::cout << "Please enter a valid unsigned 64 bit integer"
-                  << std::endl;
-        std::cin.clear();
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max());
-        return -1;
-      }
-      client.requestCancelOrder(orderId);
-    } else { // Modify Order
-      OrderId orderId = 0;
-      std::cout << "\nOrder Id: ";
-      if (!(std::cin >> orderId)) {
-        std::cout << "Please enter a valid unsigned 64 bit integer"
-                  << std::endl;
-        std::cin.clear();
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max());
-        return -1;
-      }
-      Quantity quantity = 0;
-      std::cout << "\nNew Quantity: ";
-      if (!(std::cin >> quantity)) {
-        std::cout << "Please enter a valid unsigned 64 bit integer"
-                  << std::endl;
-        std::cin.clear();
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max());
-        return -1;
-      }
-      client.requestModifyOrder(orderId, quantity);
+    std::cout << prompt << std::flush;
+    uint64_t value;
+    if (std::cin >> value && value >= low && value <= high) {
+      return value;
     }
+    if (std::cin.eof()) {
+      std::cout << std::endl;
+      std::exit(0);
+    }
+    std::cout << "Please enter a number from " << low << " to " << high
+              << std::endl;
+    std::cin.clear();
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
   }
+}
 
-  return 0;
+constexpr uint64_t U64_MAX = std::numeric_limits<uint64_t>::max();
+
+} // namespace
+
+int main(int argc, char **argv) {
+  uint16_t port = argc > 1 ? static_cast<uint16_t>(std::atoi(argv[1])) : 8080;
+
+  try {
+    OrderbookClient client{port};
+    std::cout << "Connected to server on port " << port << std::endl;
+
+    while (true) {
+      std::cout << "\n=======Actions=======\n"
+                   "(1) New Order\n"
+                   "(2) Cancel Order\n"
+                   "(3) Modify Order\n";
+      uint64_t action = readNumber("> ", 1, 3);
+
+      if (action == 1) {
+        uint64_t sideOption = readNumber("Side (1) Buy (2) Sell: ", 1, 2);
+        Side side = sideOption == 1 ? Side::Bid : Side::Ask;
+        Price price = static_cast<Price>(
+            readNumber("Price: ", 0, std::numeric_limits<Price>::max()));
+        Quantity quantity = readNumber("Quantity: ", 0, U64_MAX);
+
+        NewOrderResult res = client.requestNewOrder(side, price, quantity);
+        std::cout << OrderbookClient::statusName(res.status);
+        if (res.orderId != 0) {
+          std::cout << ", resting with order id " << res.orderId;
+        } else if (res.status == Status::Success) {
+          std::cout << ", filled in full";
+        }
+        std::cout << std::endl;
+      } else if (action == 2) {
+        OrderId id = readNumber("Order id: ", 0, U64_MAX);
+        std::cout << OrderbookClient::statusName(client.requestCancelOrder(id))
+                  << std::endl;
+      } else {
+        OrderId id = readNumber("Order id: ", 0, U64_MAX);
+        Quantity quantity = readNumber("New quantity: ", 0, U64_MAX);
+        std::cout << OrderbookClient::statusName(
+                         client.requestModifyOrder(id, quantity))
+                  << std::endl;
+      }
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "error: " << e.what() << std::endl;
+    return 1;
+  }
 }
