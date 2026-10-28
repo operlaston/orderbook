@@ -1,12 +1,7 @@
-#include <GlobalConsts.h>
-#include <MessageType.h>
-#include <OrderType.h>
 #include <RequestTypes.h>
 #include <ResponseTypes.h>
 #include <Server.h>
 #include <ServerEngineContext.h>
-#include <Side.h>
-#include <TimeInForce.h>
 #include <Utils.h>
 #include <array>
 #include <asm-generic/socket.h>
@@ -27,8 +22,6 @@
 #include <system_error>
 #include <unistd.h>
 #include <variant>
-
-// Server::Server(uint16_t port) { initFds(port); }
 
 Server::Server(ServerEngineContext &ctx, uint16_t port) : m_ctx(ctx) {
   // initialize epoll fd

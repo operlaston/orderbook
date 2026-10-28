@@ -70,15 +70,36 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
 }
 
 bool Orderbook::cancelOrder(OrderId orderId) {
-  std::optional<Level::iterator> levelItOpt = m_idToOrderPtr[orderId];
-  if (!levelItOpt.has_value()) {
-    std::cout << "couldn't cancel because given order id doesn't exist" << std::endl;
+  if (orderId >= m_idToOrderPtr.size()) {
+    std::cout << "invalid order id";
     return false;
   }
-  auto levelIt = *levelItOpt;
-  eraseOrder(levelIt);
+  std::optional<Level::iterator> orderItOpt = m_idToOrderPtr[orderId];
+  if (!orderItOpt.has_value()) {
+    std::cout << "order id is no longer valid" << std::endl;
+    return false;
+  }
+  auto orderIt = *orderItOpt;
+  eraseOrder(orderIt);
   m_idToOrderPtr[orderId] = std::nullopt;
   return true;
+}
+
+void Orderbook::modifyOrder(OrderId orderId, Quantity newQuantity) {
+  if (orderId >= m_idToOrderPtr.size()) {
+    std::cout << "invalid order id";
+    return;
+  }
+  std::optional<Level::iterator> orderItOpt = m_idToOrderPtr[orderId];
+  if (!orderItOpt.has_value()) {
+    std::cout << "order id is no longer valid" << std::endl;
+    return;
+  }
+  Order& order = **orderItOpt;
+  if (order.getQuantity() <= newQuantity || newQuantity == 0) {
+    std::cout << "new quantity must be nonzero and less than old quantity" << std::endl;
+  }
+  order.setQuantity(newQuantity);
 }
 
 void Orderbook::restOrder(const Order& order) {
@@ -115,31 +136,33 @@ void Orderbook::restOrder(const Order& order) {
 
 void Orderbook::eraseOrder(Level::iterator orderIt) {
   const Order order = *orderIt;
+  const Price price = order.getPrice();
   m_idToOrderPtr[order.getId()] = std::nullopt;
   if (order.getSide() == Side::Bid) {
-    m_bids[order.getPrice()].erase(orderIt);
+    m_bids[price].erase(orderIt);
     m_numBids--;
 
-    if (m_bids[order.getPrice()].empty()) {
-      if (order.getPrice() == m_bestBidPrice && m_numBids > 0) {
-        m_bestBidPrice = m_bidsBitset.unsetAndGetPrev(m_bestBidPrice);
+    if (m_bids[price].empty()) {
+      if (price == m_bestBidPrice && m_numBids > 0) {
+        m_bestBidPrice = m_bidsBitset.unsetAndGetPrev(price);
       }
       else {
-        m_bidsBitset.unset(order.getPrice());
+        m_bidsBitset.unset(price);
       }
     }
   }
   else {
-    m_asks[order.getPrice()].erase(orderIt);
+    m_asks[price].erase(orderIt);
     m_numAsks--;
 
-    if (m_asks[order.getPrice()].empty()) {
-      if (order.getPrice() == m_bestAskPrice && m_numAsks > 0) {
-        m_bestAskPrice = m_asksBitset.unsetAndGetNext(m_bestAskPrice);
+    if (m_asks[price].empty()) {
+      if (price == m_bestAskPrice && m_numAsks > 0) {
+        m_bestAskPrice = m_asksBitset.unsetAndGetNext(price);
       }
       else {
-        m_asksBitset.unset(order.getPrice());
+        m_asksBitset.unset(price);
       }
     }
   }
 }
+

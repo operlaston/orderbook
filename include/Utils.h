@@ -7,7 +7,18 @@
 using OrderId = uint64_t;
 using Quantity = uint64_t;
 using Price = uint32_t;
-using Timestamp = uint64_t;
+
+enum class Status: uint8_t {
+  Success = 0,
+  BadRequest = 1,
+  ServerError = 2
+};
+
+enum class MessageType: uint8_t {
+  NewOrder = 0,
+  CancelOrder = 1,
+  ModifyOrder = 2
+};
 
 template <class... Ts> struct overload : Ts... {
   using Ts::operator()...;
@@ -34,3 +45,4 @@ enum class Side : uint8_t {
 // #endif
 
 static constexpr size_t CACHE_LINE_SIZE = 64;
+static constexpr uint32_t SPSC_QUEUE_SIZE = 1 << 17; // 131072

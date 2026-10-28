@@ -13,9 +13,12 @@ using Level = std::list<Order, BlockAllocator<Order>>;
 
 class Orderbook {
 public:
+  static constexpr uint64_t MAX_PRICE = 100000;
+
   explicit Orderbook(uint64_t blockCount, uint32_t initialOrderMax); // # of blocks to allocate
   void addOrder(Side side, Price price, Quantity quantity);
   bool cancelOrder(OrderId orderId);
+  void modifyOrder(OrderId orderId, Quantity newQuantity);
   const std::vector<Level>& getBids() const { return m_bids; }
   const std::vector<Level>& getAsks() const { return m_asks; }
   const PriceBitset& getBidsBitset() const { return m_bidsBitset; }
@@ -35,9 +38,7 @@ private:
   uint32_t m_bestAskPrice;
   uint64_t m_numBids;
   uint64_t m_numAsks;
-
   OrderId m_currId{1};
-  static constexpr uint64_t MAX_PRICE = 100000;
 
   void restOrder(const Order& order);
   void eraseOrder(Level::iterator orderIt);
