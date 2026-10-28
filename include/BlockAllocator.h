@@ -10,6 +10,12 @@
 template<typename T>
 class BlockAllocator;
 
+// A fixed number of equal-sized blocks carved from one cache-line-aligned
+// buffer. Free blocks form an intrusive singly linked list: a free block's
+// first 8 bytes store the pointer to the next free block, so no extra memory
+// is needed. That is why blockSize must be at least a pointer, and a multiple
+// of 8 so every block stays pointer-aligned. allocate/deallocate just pop and
+// push the list head.
 class FixedPool {
 public:
   FixedPool(uint64_t blockCount, uint64_t blockSize) : m_blockSize(blockSize){
@@ -79,6 +85,10 @@ private:
 };
 
 
+// STL allocator backed by a FixedPool. std::list rebinds it to its node type
+// and allocates one node at a time. Those come from the pool while it has
+// blocks left. Anything else (n != 1, a type bigger than a block, or an empty
+// pool) falls back to ::operator new.
 template<typename T>
 class BlockAllocator {
 public:
@@ -101,6 +111,9 @@ public:
     return static_cast<T*>(::operator new(n * sizeof(T)));
   }
 
+  // Pool and heap memory are told apart by address: anything inside the
+  // pool's buffer goes back to the free list, everything else was heap
+  // allocated.
   void deallocate(T* ptr, std::size_t n) {
     (void)n;
     uint8_t *p = reinterpret_cast<uint8_t *>(ptr);

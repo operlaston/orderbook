@@ -4,6 +4,12 @@
 #include <cstdint>
 #include <vector>
 
+// One bit per price. Bit p lives in word p >> 6 at bit position p & 63, so
+// scanning 64 prices costs one word compare and the first/last set bit in a
+// word is a single ctz/clz instruction.
+//
+// Price 0 is reserved: the scan functions return 0 to mean "no bit set", so
+// the order book never stores anything at price 0.
 class PriceBitset {
 public:
   PriceBitset(uint64_t size) {
@@ -26,8 +32,9 @@ public:
     m_bitset[getIndexOf(pos)] &= ~getMaskWithPosSet(pos);
   }
 
-  // assumes the passed in position is the first bit set
-  // this function is used to update the best ask
+  // Clears pos and returns the lowest set bit above it (0 if none). Used to
+  // find the new best ask, so pos must be the lowest set bit. That lets the
+  // scan start at pos's word and use ctz on the first non-zero word.
   uint64_t unsetAndGetNext(uint64_t pos) {
     unset(pos);
     uint64_t currIndex = getIndexOf(pos);
@@ -39,8 +46,9 @@ public:
     return (currIndex << shift) | setBitLocal;
   }
 
-  // assumes the passed in position is the last bit set
-  // this function is used to update the best bid
+  // Clears pos and returns the highest set bit below it (0 if none). Used to
+  // find the new best bid, so pos must be the highest set bit. The scan walks
+  // words downwards and takes 63 - clz of the first non-zero one.
   uint64_t unsetAndGetPrev(uint64_t pos) {
     unset(pos);
     uint64_t currIndex = getIndexOf(pos);
