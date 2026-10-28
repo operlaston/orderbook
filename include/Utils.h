@@ -8,18 +8,6 @@ using OrderId = uint64_t;
 using Quantity = uint64_t;
 using Price = uint32_t;
 
-enum class Status: uint8_t {
-  Success = 0,
-  BadRequest = 1,
-  ServerError = 2
-};
-
-enum class MessageType: uint8_t {
-  NewOrder = 0,
-  CancelOrder = 1,
-  ModifyOrder = 2
-};
-
 template <class... Ts> struct overload : Ts... {
   using Ts::operator()...;
 };

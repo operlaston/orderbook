@@ -1,4 +1,5 @@
 #pragma once
+#include "Protocol.h"
 #include "ResponseTypes.h"
 #include "ServerEngineContext.h"
 #include <Session.h>
@@ -12,6 +13,9 @@ private:
   ServerEngineContext &m_ctx;
   int m_socket = -1;
   int m_epollFd = -1;
+  static constexpr Protocol::Status SUCCESS = Protocol::Status::Success;
+  static constexpr Protocol::Status BAD_REQUEST = Protocol::Status::BadRequest;
+  static constexpr Protocol::Status SERVER_ERROR = Protocol::Status::ServerError;
 
   void addFdEpoll(int fd);
   void removeFdEpoll(int fd);

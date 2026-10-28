@@ -1,3 +1,4 @@
+#include "Protocol.h"
 #include <RequestTypes.h>
 #include <ResponseTypes.h>
 #include <Server.h>
@@ -5,7 +6,6 @@
 #include <Utils.h>
 #include <array>
 #include <asm-generic/socket.h>
-#include <bit>
 #include <cassert>
 #include <cerrno>
 #include <cstdint>
@@ -130,36 +130,31 @@ void Server::writeSafely(int fd, const void *buf, size_t n) {
 
 // return false means error occurred or bad request
 bool Server::handleNewOrder(int currFd) {
-  // 1 byte Side, 1 byte OrderType, 1 byte TimeInForce, 8 byte Price,
+  // 1 byte Side, 8 byte Price,
   // 8 byte Quantity
   Side side;
-  OrderType orderType;
-  TimeInForce timeInForce;
   uint64_t priceRaw;
   uint64_t quantityRaw;
 
-  std::array<uint8_t, GlobalLengths::NEW_ORDER_MESSAGE> buf;
+  std::array<uint8_t, Protocol::NEW_ORDER_SIZE> buf;
   int bytesRead = read(currFd, buf.data(), buf.size());
   if (bytesRead == 0) {
     markSessionClosed(currFd);
-    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &BAD_REQUEST, 1);
     return false;
   } else if (bytesRead != static_cast<int>(buf.size())) {
-    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &BAD_REQUEST, 1);
     return false;
   }
   side = static_cast<Side>(buf[0]);
-  orderType = static_cast<OrderType>(buf[1]);
-  timeInForce = static_cast<TimeInForce>(buf[2]);
-  std::memcpy(&priceRaw, &buf[3], sizeof(Price));
-  std::memcpy(&quantityRaw, &buf[11], sizeof(Quantity));
+  std::memcpy(&priceRaw, &buf[1], sizeof(Price));
+  std::memcpy(&quantityRaw, &buf[5], sizeof(Quantity));
 
-  priceRaw = be64toh(priceRaw);
-  Price price = std::bit_cast<Price>(priceRaw);
+  Price price = be64toh(priceRaw);
   Quantity quantity = be64toh(quantityRaw);
 
-  Request::NewOrder newOrderReq{currFd,      side,  orderType,
-                                timeInForce, price, quantity};
+  Request::NewOrder newOrderReq{currFd,      side,
+                                price, quantity};
   m_sessions.at(currFd).addActiveRequest();
 
   // push the request onto the spsc queue
@@ -175,10 +170,10 @@ bool Server::handleCancelOrder(int currFd) {
   int bytesRead = read(currFd, &orderId, sizeof(OrderId));
   if (bytesRead == 0) {
     markSessionClosed(currFd);
-    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &BAD_REQUEST, 1);
     return false;
   } else if (bytesRead != sizeof(OrderId)) {
-    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &BAD_REQUEST, 1);
     return false;
   }
   orderId = be64toh(orderId);
@@ -196,14 +191,14 @@ bool Server::handleCancelOrder(int currFd) {
 bool Server::handleModifyOrder(int currFd) {
   OrderId orderId;
   Quantity newQuantity;
-  std::array<uint8_t, GlobalLengths::MODIFY_ORDER_MESSAGE> buf;
+  std::array<uint8_t, Protocol::MODIFY_ORDER_SIZE> buf;
   int bytesRead = read(currFd, buf.data(), buf.size());
   if (bytesRead == 0) {
     markSessionClosed(currFd);
-    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &BAD_REQUEST, 1);
     return false;
   } else if (bytesRead != static_cast<int>(buf.size())) {
-    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &BAD_REQUEST, 1);
     return false;
   }
 
@@ -232,9 +227,9 @@ void Server::sendResponse(const ServerResponse &resVariant) {
   Session &session = m_sessions.at(sessionId);
 
   std::visit(overload{[this](const Response::NewOrder &res) {
-                        std::array<uint8_t, 9> buf;
-                        buf[0] = res.status;
-                        OrderId netNewOrderId = htobe64(res.newOrderId);
+                        std::array<uint8_t, Protocol::NEW_ORDER_RES_SIZE> buf;
+                        buf[0] = static_cast<uint8_t>(res.status);
+                        OrderId netNewOrderId = htobe64(res.orderId);
                         std::memcpy(&buf[1], &netNewOrderId, 8);
                         writeSafely(res.sessionId, buf.data(), buf.size());
                       },
@@ -303,23 +298,23 @@ void Server::run() {
             }
           }
 
-          MessageType messageType = static_cast<MessageType>(messageTypeRaw);
+          Protocol::MessageType messageType = static_cast<Protocol::MessageType>(messageTypeRaw);
 
-          if (messageType == MessageType::NEW_ORDER) {
+          if (messageType == Protocol::MessageType::NewOrder) {
             if (!handleNewOrder(currFd))
               break;
 
-          } else if (messageType == MessageType::CANCEL_ORDER) {
+          } else if (messageType == Protocol::MessageType::CancelOrder) {
             if (!handleCancelOrder(currFd))
               break;
 
-          } else if (messageType == MessageType::MODIFY_ORDER) {
+          } else if (messageType == Protocol::MessageType::ModifyOrder) {
             if (!handleModifyOrder(currFd))
               break;
 
           } else {
             // invalid message type (maybe supported in the future)
-            writeSafely(currFd, &ResponseStatus::INVALID_MESSAGE_TYPE, 1);
+            writeSafely(currFd, &BAD_REQUEST, 1);
             break;
           }
         }
