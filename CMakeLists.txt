@@ -12,8 +12,6 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-option(ORDERBOOK_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
-
 find_package(GTest REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -22,11 +20,6 @@ add_library(project_options INTERFACE)
 target_include_directories(project_options INTERFACE include)
 target_compile_options(project_options INTERFACE -Wall -Wextra)
 target_link_libraries(project_options INTERFACE Threads::Threads)
-if(ORDERBOOK_SANITIZE)
-  target_compile_options(project_options INTERFACE
-    -fsanitize=address,undefined -fno-omit-frame-pointer)
-  target_link_options(project_options INTERFACE -fsanitize=address,undefined)
-endif()
 
 # Matching engine, shared by the server, tests and benchmark.
 add_library(engine STATIC

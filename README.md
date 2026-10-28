@@ -72,13 +72,6 @@ This builds four binaries in `build/`:
 ./build/bench            # use a Release build
 ```
 
-To run the tests with AddressSanitizer and UBSan:
-
-```sh
-cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DORDERBOOK_SANITIZE=ON
-cmake --build build-asan -j && ./build-asan/tests
-```
-
 # Communication Protocol
 
 A binary protocol on top of TCP. All multi-byte integers are **big-endian**,
