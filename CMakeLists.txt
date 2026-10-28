@@ -21,6 +21,8 @@ find_package(GTest REQUIRED)
 add_executable(tests
   src/Orderbook.cpp
   tests/OrderbookTest.cpp
+  tests/ProtocolTest.cpp
+  tests/SpscQueueTest.cpp
 )
 
 add_executable(bench
