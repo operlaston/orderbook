@@ -1,12 +1,6 @@
-#include "GlobalConsts.h"
-#include <MessageType.h>
-#include <OrderType.h>
-#include <Side.h>
-#include <TimeInForce.h>
 #include <Utils.h>
 #include <arpa/inet.h>
 #include <array>
-#include <bit>
 #include <cstring>
 #include <endian.h>
 #include <iostream>
@@ -14,6 +8,7 @@
 #include <stdexcept>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <Protocol.h>
 
 class OrderbookClient {
 private:
@@ -93,25 +88,20 @@ public:
     } while (n > 0);
   }
 
-  OrderId requestNewOrder(Side side, OrderType orderType,
-                          TimeInForce timeInForce, Price price,
-                          Quantity quantity) {
-    std::array<uint8_t, 20> buf;
-    buf[0] = static_cast<uint8_t>(MessageType::NEW_ORDER);
+  OrderId requestNewOrder(Side side, Price price, Quantity quantity) {
+    std::array<uint8_t, Protocol::NEW_ORDER_SIZE + sizeof(Protocol::MessageType)> buf;
+    buf[0] = static_cast<uint8_t>(Protocol::MessageType::NewOrder);
     buf[1] = static_cast<uint8_t>(side);
-    buf[2] = static_cast<uint8_t>(orderType);
-    buf[3] = static_cast<uint8_t>(timeInForce);
 
-    uint64_t priceRaw = std::bit_cast<uint64_t>(price);
-    priceRaw = htobe64(priceRaw);
+    uint64_t priceRaw = htobe64(price);
     uint64_t quantityRaw = htobe64(quantity);
 
-    std::memcpy(&buf[4], &priceRaw, 8);
-    std::memcpy(&buf[12], &quantityRaw, 8);
+    std::memcpy(&buf[2], &priceRaw, 8);
+    std::memcpy(&buf[2 + sizeof(Price)], &quantityRaw, 8);
     safeWrite(buf.data(), buf.size());
 
     // get response
-    std::array<uint8_t, 9> responseBuf;
+    std::array<uint8_t, Protocol::NEW_ORDER_RES_SIZE> responseBuf;
     safeRead(responseBuf.data(), responseBuf.size());
 
     printStatus(responseBuf[0]);
@@ -124,21 +114,10 @@ public:
     return newOrderId;
   }
 
-  OrderId requestMarketOrder(Side side, Quantity quantity) {
-    return requestNewOrder(side, OrderType::MARKET, TimeInForce::NONE, 0,
-                           quantity);
-  }
-
-  OrderId requestLimitOrder(Side side, TimeInForce timeInForce, Price price,
-                            Quantity quantity) {
-    return requestNewOrder(side, OrderType::LIMIT, timeInForce, price,
-                           quantity);
-  }
-
   void requestCancelOrder(OrderId orderId) {
     std::cout << "Cancel Order " << orderId << std::endl;
     std::array<uint8_t, 9> buf;
-    buf[0] = static_cast<uint8_t>(MessageType::CANCEL_ORDER);
+    buf[0] = static_cast<uint8_t>(Protocol::MessageType::CancelOrder);
     uint64_t orderIdRaw = htobe64(orderId);
     memcpy(&buf[1], &orderIdRaw, 8);
     safeWrite(buf.data(), buf.size());
@@ -152,11 +131,11 @@ public:
     std::cout << "Modify Order " << orderId
               << ". Attempt to change quantity to " << newQuantity << std::endl;
     std::array<uint8_t, 17> buf;
-    buf[0] = static_cast<uint8_t>(MessageType::MODIFY_ORDER);
+    buf[0] = static_cast<uint8_t>(Protocol::MessageType::ModifyOrder);
     uint64_t orderIdRaw = htobe64(orderId);
     uint64_t newQuantityRaw = htobe64(newQuantity);
     memcpy(&buf[1], &orderIdRaw, 8);
-    memcpy(&buf[9], &newQuantityRaw, 8);
+    memcpy(&buf[1 + sizeof(OrderId)], &newQuantityRaw, 8);
     safeWrite(buf.data(), buf.size());
 
     uint8_t res;
@@ -186,24 +165,15 @@ public:
   static void printStatus(uint8_t status) {
     std::cout << std::endl;
     switch (status) {
-    case ResponseStatus::SUCCESS:
-      std::cout << "SUCCESS" << std::endl;
-      break;
-    case ResponseStatus::BAD_REQUEST:
-      std::cout << "BAD REQUEST" << std::endl;
-      break;
-    case ResponseStatus::INVALID_MESSAGE_TYPE:
-      std::cout << "INVALID MESSAGE TYPE" << std::endl;
-      break;
-    case ResponseStatus::SERVER_ERROR:
-      std::cout << "SERVER ERROR" << std::endl;
-      break;
-    case ResponseStatus::PARTIAL_FILL:
-      std::cout << "PARTIALLY FILLED ORDER" << std::endl;
-      break;
-    case ResponseStatus::CANT_FILL:
-      std::cout << "CANT FILL ORDER" << std::endl;
-      break;
+      case static_cast<int>(Protocol::Status::Success):
+        std::cout << "SUCCESS" << std::endl;
+        break;
+      case static_cast<int>(Protocol::Status::BadRequest):
+        std::cout << "BAD REQUEST" << std::endl;
+        break;
+      case static_cast<int>(Protocol::Status::ServerError):
+        std::cout << "SERVER ERROR" << std::endl;
+        break;
     }
   }
 };

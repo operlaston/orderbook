@@ -147,8 +147,8 @@ bool Server::handleNewOrder(int currFd) {
     return false;
   }
   side = static_cast<Side>(buf[0]);
-  std::memcpy(&priceRaw, &buf[1], sizeof(Price));
-  std::memcpy(&quantityRaw, &buf[5], sizeof(Quantity));
+  std::memcpy(&priceRaw, &buf[sizeof(Side)], sizeof(Price));
+  std::memcpy(&quantityRaw, &buf[sizeof(Side) + sizeof(Price)], sizeof(Quantity));
 
   Price price = be64toh(priceRaw);
   Quantity quantity = be64toh(quantityRaw);
@@ -203,7 +203,7 @@ bool Server::handleModifyOrder(int currFd) {
   }
 
   std::memcpy(&orderId, &buf[0], sizeof(OrderId));
-  std::memcpy(&newQuantity, &buf[8], sizeof(Quantity));
+  std::memcpy(&newQuantity, &buf[sizeof(OrderId)], sizeof(Quantity));
 
   orderId = be64toh(orderId);
   newQuantity = be64toh(newQuantity);
