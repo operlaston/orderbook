@@ -20,6 +20,8 @@ find_package(GTest REQUIRED)
 # The program to build and the source files that go into it
 add_executable(tests
   src/Orderbook.cpp
+  src/Engine.cpp
+  tests/EngineTest.cpp
   tests/OrderbookTest.cpp
   tests/OrderbookFuzzTest.cpp
   tests/ProtocolTest.cpp

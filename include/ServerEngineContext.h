@@ -8,6 +8,15 @@
 #include <system_error>
 #include <unistd.h>
 
+// Shared state between the server (network) thread and the engine thread.
+// - incomingRequests: server -> engine. The server is the only producer and
+//   the engine the only consumer.
+// - outgoingResponses: engine -> server, likewise single producer/consumer.
+// - eventFd: the server sleeps in epoll_wait, so it can't poll the response
+//   queue. The engine writes to this eventfd after pushing responses. The fd
+//   is in the server's epoll set, so the write wakes it to drain the queue.
+//
+// The queues are a few MB, so allocate this on the heap.
 struct ServerEngineContext {
   alignas(CACHE_LINE_SIZE) SpscQueue<ClientRequest, 65536> incomingRequests;
   alignas(CACHE_LINE_SIZE) SpscQueue<ServerResponse, 65536> outgoingResponses;
