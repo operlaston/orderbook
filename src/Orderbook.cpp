@@ -1,6 +1,8 @@
+#include "Protocol.h"
 #include "Utils.h"
 #include <Orderbook.h>
 #include <optional>
+#include <utility>
 
 Orderbook::Orderbook(uint64_t blockCount, uint32_t initialOrderMax) :
   m_memPool(blockCount, CACHE_LINE_SIZE), // allocate a buffer to hold blockCount Order objects on the heap
@@ -17,12 +19,12 @@ Orderbook::Orderbook(uint64_t blockCount, uint32_t initialOrderMax) :
   m_numAsks(0)
 {}
 
-void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
+std::pair<OrderId, Protocol::Status> Orderbook::addOrder(Side side, Price price, Quantity quantity) {
   Order order{m_currId, quantity, price, side};
 
   if (order.getPrice() > MAX_PRICE || order.getQuantity() == 0) {
     std::cout << "can't add orders with prices greater than " << MAX_PRICE << "\n";
-    return;
+    return {0, Protocol::Status::BadRequest};
   }
 
   // check opposing asks on bid order
@@ -66,40 +68,44 @@ void Orderbook::addOrder(Side side, Price price, Quantity quantity) {
   // if there is any remaining quantity, the order must rest
   if (order.getQuantity() > 0) {
     restOrder(order);
+    return {order.getId(), Protocol::Status::Success};
   }
+  return {0, Protocol::Status::Success};
 }
 
-bool Orderbook::cancelOrder(OrderId orderId) {
+Protocol::Status Orderbook::cancelOrder(OrderId orderId) {
   if (orderId >= m_idToOrderPtr.size()) {
     std::cout << "invalid order id";
-    return false;
+    return Protocol::Status::BadRequest;
   }
   std::optional<Level::iterator> orderItOpt = m_idToOrderPtr[orderId];
   if (!orderItOpt.has_value()) {
     std::cout << "order id is no longer valid" << std::endl;
-    return false;
+    return Protocol::Status::BadRequest;
   }
   auto orderIt = *orderItOpt;
   eraseOrder(orderIt);
   m_idToOrderPtr[orderId] = std::nullopt;
-  return true;
+  return Protocol::Status::Success;
 }
 
-void Orderbook::modifyOrder(OrderId orderId, Quantity newQuantity) {
+Protocol::Status Orderbook::modifyOrder(OrderId orderId, Quantity newQuantity) {
   if (orderId >= m_idToOrderPtr.size()) {
     std::cout << "invalid order id";
-    return;
+    return Protocol::Status::BadRequest;
   }
   std::optional<Level::iterator> orderItOpt = m_idToOrderPtr[orderId];
   if (!orderItOpt.has_value()) {
     std::cout << "order id is no longer valid" << std::endl;
-    return;
+    return Protocol::Status::BadRequest;
   }
   Order& order = **orderItOpt;
   if (order.getQuantity() <= newQuantity || newQuantity == 0) {
     std::cout << "new quantity must be nonzero and less than old quantity" << std::endl;
+    return Protocol::Status::BadRequest;
   }
   order.setQuantity(newQuantity);
+  return Protocol::Status::Success;
 }
 
 void Orderbook::restOrder(const Order& order) {

@@ -11,6 +11,8 @@ struct Request {
   Price price;
   Quantity quantity;
 
+  Request() = default;
+
   Request(int sid, Side s, Price p, Quantity q) :
     sessionId(sid),
     type(Protocol::MessageType::NewOrder),

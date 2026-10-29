@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BlockAllocator.h"
+#include "Protocol.h"
 #include "Utils.h"
 #include <cstdint>
 #include <list>
@@ -16,9 +17,9 @@ public:
   static constexpr uint64_t MAX_PRICE = 100000;
 
   explicit Orderbook(uint64_t blockCount, uint32_t initialOrderMax); // # of blocks to allocate
-  void addOrder(Side side, Price price, Quantity quantity);
-  bool cancelOrder(OrderId orderId);
-  void modifyOrder(OrderId orderId, Quantity newQuantity);
+  std::pair<OrderId, Protocol::Status> addOrder(Side side, Price price, Quantity quantity);
+  Protocol::Status cancelOrder(OrderId orderId);
+  Protocol::Status modifyOrder(OrderId orderId, Quantity newQuantity);
   const std::vector<Level>& getBids() const { return m_bids; }
   const std::vector<Level>& getAsks() const { return m_asks; }
   const PriceBitset& getBidsBitset() const { return m_bidsBitset; }

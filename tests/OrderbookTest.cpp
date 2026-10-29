@@ -1,3 +1,4 @@
+#include "Protocol.h"
 #include <gtest/gtest.h>
 
 #include <Orderbook.h>
@@ -126,8 +127,8 @@ TEST_F(OrderbookTest, BidCanBeCancelled) {
   bid(100, 10);
   ASSERT_NE(getOrderIter(1), std::nullopt);
 
-  bool res = ob.cancelOrder(1);
-  ASSERT_TRUE(res);
+  Protocol::Status res = ob.cancelOrder(1);
+  ASSERT_EQ(res, Protocol::Status::Success);
   ASSERT_EQ(getOrderIter(1), std::nullopt);
 }
 
@@ -135,14 +136,14 @@ TEST_F(OrderbookTest, AskCanBeCancelled) {
   ask(100, 10);
   ASSERT_NE(getOrderIter(1), std::nullopt);
 
-  bool res = ob.cancelOrder(1);
-  ASSERT_TRUE(res);
+  Protocol::Status res = ob.cancelOrder(1);
+  ASSERT_EQ(res, Protocol::Status::Success);
   ASSERT_EQ(getOrderIter(1), std::nullopt);
 }
 
 TEST_F(OrderbookTest, CannotCancelBadId) {
   bid(100, 10);
 
-  bool res = ob.cancelOrder(2);
-  ASSERT_FALSE(res);
+  Protocol::Status res = ob.cancelOrder(2);
+  ASSERT_EQ(res, Protocol::Status::BadRequest);
 }

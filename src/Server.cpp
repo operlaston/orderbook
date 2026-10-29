@@ -132,8 +132,8 @@ bool Server::handleNewOrder(int currFd) {
   // 1 byte Side, 8 byte Price,
   // 8 byte Quantity
   Side side;
-  uint64_t priceRaw;
-  uint64_t quantityRaw;
+  Price priceRaw;
+  Quantity quantityRaw;
 
   std::array<uint8_t, Protocol::NEW_ORDER_SIZE> buf;
   int bytesRead = read(currFd, buf.data(), buf.size());
@@ -149,7 +149,7 @@ bool Server::handleNewOrder(int currFd) {
   std::memcpy(&priceRaw, &buf[sizeof(Side)], sizeof(Price));
   std::memcpy(&quantityRaw, &buf[sizeof(Side) + sizeof(Price)], sizeof(Quantity));
 
-  Price price = be64toh(priceRaw);
+  Price price = be32toh(priceRaw);
   Quantity quantity = be64toh(quantityRaw);
 
   Request newOrderReq{currFd, side, price, quantity};

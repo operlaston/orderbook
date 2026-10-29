@@ -28,9 +28,22 @@ add_executable(bench
   bench/benchmark.cpp
 )
 
+add_executable(orderbook
+  src/Orderbook.cpp
+  src/Server.cpp
+  src/main.cpp
+)
+
+add_executable(client
+  src/client/Client.cpp
+)
+
 # Where to look for #include <...> headers (glad/, KHR/)
 target_include_directories(tests PRIVATE include)
 target_include_directories(bench PRIVATE include)
+target_include_directories(orderbook PRIVATE include)
+target_include_directories(client PRIVATE include)
 
 # Libraries to link against
 target_link_libraries(tests PRIVATE GTest::gtest GTest::gtest_main pthread ${CMAKE_DL_LIBS})
+target_link_libraries(orderbook PRIVATE pthread ${CMAKE_DL_LIBS})

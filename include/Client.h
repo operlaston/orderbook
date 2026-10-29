@@ -95,11 +95,11 @@ public:
     buf[0] = static_cast<uint8_t>(Protocol::MessageType::NewOrder);
     buf[1] = static_cast<uint8_t>(side);
 
-    uint64_t priceRaw = htobe64(price);
-    uint64_t quantityRaw = htobe64(quantity);
+    Price priceRaw = htobe32(price);
+    Quantity quantityRaw = htobe64(quantity);
 
-    std::memcpy(&buf[2], &priceRaw, 8);
-    std::memcpy(&buf[2 + sizeof(Price)], &quantityRaw, 8);
+    std::memcpy(&buf[2], &priceRaw, sizeof(Price));
+    std::memcpy(&buf[2 + sizeof(Price)], &quantityRaw, sizeof(Quantity));
     safeWrite(buf.data(), buf.size());
 
     // get response
@@ -108,8 +108,8 @@ public:
 
     printStatus(responseBuf[0]);
 
-    uint64_t newOrderIdRaw;
-    memcpy(&newOrderIdRaw, &responseBuf[1], 8);
+    OrderId newOrderIdRaw;
+    memcpy(&newOrderIdRaw, &responseBuf[1], sizeof(OrderId));
     OrderId newOrderId = be64toh(newOrderIdRaw);
     if (newOrderId > 0)
       std::cout << "\nNew Order ID is " << newOrderId << std::endl;
@@ -120,8 +120,8 @@ public:
     std::cout << "Cancel Order " << orderId << std::endl;
     std::array<uint8_t, 9> buf;
     buf[0] = static_cast<uint8_t>(Protocol::MessageType::CancelOrder);
-    uint64_t orderIdRaw = htobe64(orderId);
-    memcpy(&buf[1], &orderIdRaw, 8);
+    OrderId orderIdRaw = htobe64(orderId);
+    memcpy(&buf[1], &orderIdRaw, sizeof(OrderId));
     safeWrite(buf.data(), buf.size());
 
     uint8_t res;
@@ -134,10 +134,10 @@ public:
               << ". Attempt to change quantity to " << newQuantity << std::endl;
     std::array<uint8_t, 17> buf;
     buf[0] = static_cast<uint8_t>(Protocol::MessageType::ModifyOrder);
-    uint64_t orderIdRaw = htobe64(orderId);
-    uint64_t newQuantityRaw = htobe64(newQuantity);
-    memcpy(&buf[1], &orderIdRaw, 8);
-    memcpy(&buf[1 + sizeof(OrderId)], &newQuantityRaw, 8);
+    OrderId orderIdRaw = htobe64(orderId);
+    Quantity newQuantityRaw = htobe64(newQuantity);
+    memcpy(&buf[1], &orderIdRaw, sizeof(OrderId));
+    memcpy(&buf[1 + sizeof(OrderId)], &newQuantityRaw, sizeof(Quantity));
     safeWrite(buf.data(), buf.size());
 
     uint8_t res;
