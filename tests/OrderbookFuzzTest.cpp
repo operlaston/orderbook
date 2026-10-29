@@ -3,7 +3,6 @@
 
 #include "Protocol.h"
 #include <gtest/gtest.h>
-#include "TestPrinters.h"
 
 #include <Order.h>
 #include <Orderbook.h>
