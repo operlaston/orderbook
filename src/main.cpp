@@ -1,27 +1,18 @@
-#include <OrderType.h>
 #include <Orderbook.h>
 #include <Server.h>
 #include <ServerEngineContext.h>
-#include <TimeInForce.h>
-#include <functional>
 #include <thread>
-
-void runEngine(ServerEngineContext &ctx) {
-  Orderbook orderbook{ctx};
-  orderbook.run();
-}
-
-void runServer(ServerEngineContext &ctx) {
-  Server server{ctx};
-  server.run();
-}
+#include <Engine.h>
 
 int main() {
   ServerEngineContext ctx;
-  std::jthread matchingEngine(runEngine, std::ref(ctx));
-  std::jthread server(runServer, std::ref(ctx));
+  Engine engine{10'000'000, 10'000'000, ctx};
+  std::jthread matchingEngine([&engine]() {
+    engine.run();
+  });
+  Server server{ctx};
+  server.run();
 
   matchingEngine.join();
-  server.join();
   return 0;
 }
