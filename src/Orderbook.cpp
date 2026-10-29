@@ -22,10 +22,21 @@ Orderbook::Orderbook(uint64_t blockCount, uint32_t initialOrderMax) :
 std::pair<OrderId, Protocol::Status> Orderbook::addOrder(Side side, Price price, Quantity quantity) {
   Order order{m_currId, quantity, price, side};
 
-  if (order.getPrice() > MAX_PRICE || order.getQuantity() == 0) {
-    std::cout << "can't add orders with prices greater than " << MAX_PRICE << "\n";
+  if (order.getPrice() > MAX_PRICE || order.getPrice() == 0) {
+    std::cout << "can't add - price must be between in the range [1, " << MAX_PRICE << "]\n";
     return {0, Protocol::Status::BadRequest};
   }
+
+  if (side != Side::Bid && side != Side::Ask) {
+    std::cout << "can't add - side must be bid or ask\n";
+    return {0, Protocol::Status::BadRequest};
+  }
+
+  if (quantity == 0) {
+    std::cout << "can't add - quantity must be nonzero\n";
+    return {0, Protocol::Status::BadRequest};
+  }
+
 
   // check opposing asks on bid order
   if (order.getSide() == Side::Bid) {
@@ -100,8 +111,8 @@ Protocol::Status Orderbook::modifyOrder(OrderId orderId, Quantity newQuantity) {
     return Protocol::Status::BadRequest;
   }
   Order& order = **orderItOpt;
-  if (order.getQuantity() <= newQuantity || newQuantity == 0) {
-    std::cout << "new quantity must be nonzero and less than old quantity" << std::endl;
+  if (order.getQuantity() < newQuantity || newQuantity == 0) {
+    std::cout << "new quantity must be nonzero and <= old quantity" << std::endl;
     return Protocol::Status::BadRequest;
   }
   order.setQuantity(newQuantity);
@@ -113,7 +124,7 @@ void Orderbook::restOrder(const Order& order) {
 
   Level &pl = isBid ? m_bids[order.getPrice()] : m_asks[order.getPrice()];
   Level::iterator levelIt = pl.insert(pl.end(), order);
-  if (order.getId() < m_initialOrderMax) {
+  if (order.getId() <= m_initialOrderMax) {
     m_idToOrderPtr[order.getId()] = levelIt;
   }
   else {

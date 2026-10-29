@@ -21,6 +21,8 @@ find_package(GTest REQUIRED)
 add_executable(tests
   src/Orderbook.cpp
   tests/OrderbookTest.cpp
+  tests/OrderbookFuzzTest.cpp
+  tests/SpscQueueTest.cpp
 )
 
 add_executable(bench
@@ -45,5 +47,12 @@ target_include_directories(orderbook PRIVATE include)
 target_include_directories(client PRIVATE include)
 
 # Libraries to link against
+# cmake -B build -DORDERBOOK_SANITIZE=ON builds the tests with ASan + UBSan
+option(ORDERBOOK_SANITIZE "Build tests with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+if(ORDERBOOK_SANITIZE)
+  target_compile_options(tests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(tests PRIVATE -fsanitize=address,undefined)
+endif()
+
 target_link_libraries(tests PRIVATE GTest::gtest GTest::gtest_main pthread ${CMAKE_DL_LIBS})
 target_link_libraries(orderbook PRIVATE pthread ${CMAKE_DL_LIBS})

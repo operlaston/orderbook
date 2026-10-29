@@ -25,6 +25,12 @@ public:
   const PriceBitset& getBidsBitset() const { return m_bidsBitset; }
   const PriceBitset& getAsksBitset() const { return m_asksBitset; }
   const std::vector<std::optional<Level::iterator>>& getIdMap() const { return m_idToOrderPtr; }
+  std::optional<Price> bestBid() const {
+    return m_numBids > 0 ? std::optional<Price>(m_bestBidPrice) : std::nullopt;
+  }
+  std::optional<Price> bestAsk() const {
+    return m_numAsks > 0 ? std::optional<Price>(m_bestAskPrice) : std::nullopt;
+  }
 
 private:
   FixedPool m_memPool;
