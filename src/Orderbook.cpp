@@ -1,342 +1,185 @@
-#include "Debug.h"
-#include "GlobalConsts.h"
-#include "RequestTypes.h"
-#include "ResponseTypes.h"
-#include "TimeInForce.h"
+#include "Protocol.h"
+#include "Utils.h"
 #include <Orderbook.h>
-#include <ServerEngineContext.h>
-#include <cstdint>
-#include <cstdio>
-#include <iostream>
 #include <optional>
-#include <variant>
-#include <x86intrin.h>
+#include <utility>
 
-Orderbook::Orderbook(ServerEngineContext &ctx) : m_ctx(ctx) {}
+Orderbook::Orderbook(uint64_t blockCount, uint32_t initialOrderMax) :
+  m_memPool(blockCount, CACHE_LINE_SIZE), // allocate a buffer to hold blockCount Order objects on the heap
+  m_allocator(m_memPool),
+  m_bids(MAX_PRICE + 1, Level(m_allocator)),
+  m_asks(MAX_PRICE + 1, Level(m_allocator)),
+  m_initialOrderMax(initialOrderMax),
+  m_idToOrderPtr(initialOrderMax + 1, std::nullopt), // +1 because we start at id 1
+  m_bidsBitset(MAX_PRICE + 1),
+  m_asksBitset(MAX_PRICE + 1),
+  m_bestBidPrice(0),
+  m_bestAskPrice(0),
+  m_numBids(0),
+  m_numAsks(0)
+{}
 
-// matches the incoming order against the resting/opposite-side book
-template <typename Compare>
-Quantity Orderbook::matchAgainst(BookSide<Compare> &restingBook,
-                                 const Order &incomingOrder,
-                                 const bool doFill) {
-  // gives us std::less if restingBook is asks
-  // gives us std::greater if restingBook is bids
-  // we want price >= lowestAskPrice and price <= highestBidPrice
-  Compare reversePriceCmp{};
-  Price incomingPrice = incomingOrder.getPrice();
-  Quantity incomingQuantity = incomingOrder.getQuantity();
+std::pair<OrderId, Protocol::Status> Orderbook::addOrder(Side side, Price price, Quantity quantity) {
+  Order order{m_currId, quantity, price, side};
 
-  auto bookIt = restingBook.begin();
-  while (bookIt != restingBook.end() && incomingQuantity > 0 &&
-         !reversePriceCmp(incomingPrice, bookIt->getPrice())) {
-    Quantity restingQuantity = bookIt->getQuantity();
-    Quantity filledQuantity = std::min(incomingQuantity, restingQuantity);
+  if (order.getPrice() > MAX_PRICE || order.getPrice() == 0) {
+    std::cout << "can't add - price must be between in the range [1, " << MAX_PRICE << "]\n";
+    return {0, Protocol::Status::BadRequest};
+  }
 
-    incomingQuantity -= filledQuantity;
+  if (side != Side::Bid && side != Side::Ask) {
+    std::cout << "can't add - side must be bid or ask\n";
+    return {0, Protocol::Status::BadRequest};
+  }
 
-    if (!doFill) {
-      bookIt++;
-      continue;
-    }
+  if (quantity == 0) {
+    std::cout << "can't add - quantity must be nonzero\n";
+    return {0, Protocol::Status::BadRequest};
+  }
 
-    OrderId bidId =
-        (incomingOrder.getSide() == Side::BUY) ? m_currId : bookIt->getId();
-    OrderId askId =
-        (incomingOrder.getSide() == Side::SELL) ? m_currId : bookIt->getId();
 
-    m_trades.emplace_back(bidId, askId, bookIt->getPrice(), filledQuantity,
-                          incomingOrder.getTimestamp());
-    if (filledQuantity == restingQuantity) {
-      bookIt = restingBook.erase(bookIt, m_activeOrders);
-    } else {
-      bookIt->setQuantity(restingQuantity - filledQuantity);
+  // check opposing asks on bid order
+  if (order.getSide() == Side::Bid) {
+    while (order.getQuantity() > 0 && m_numAsks > 0) {
+      Level::iterator bestAskIt = m_asks[m_bestAskPrice].begin();
+      Order& bestAsk = *bestAskIt;
+      if (bestAsk.getPrice() > order.getPrice()) {
+        break;
+      }
+      Quantity reduceQuantity = std::min(order.getQuantity(), bestAsk.getQuantity());
+      order.setQuantity(order.getQuantity() - reduceQuantity);
+      if (bestAsk.getQuantity() == reduceQuantity) {
+        eraseOrder(bestAskIt);
+      }
+      else {
+        bestAsk.setQuantity(bestAsk.getQuantity() - reduceQuantity);
+      }
     }
   }
 
-  return incomingQuantity;
+  // check opposing bids on ask order
+  else if (order.getSide() == Side::Ask) {
+    while (order.getQuantity() > 0 && m_numBids > 0) {
+      Level::iterator bestBidIt = m_bids[m_bestBidPrice].begin();
+      Order& bestBid = *bestBidIt;
+      if (bestBid.getPrice() < order.getPrice()) {
+        break;
+      }
+      Quantity reduceQuantity = std::min(order.getQuantity(), bestBid.getQuantity());
+      order.setQuantity(order.getQuantity() - reduceQuantity);
+      if (bestBid.getQuantity() == reduceQuantity) {
+        eraseOrder(bestBidIt);
+      }
+      else {
+        bestBid.setQuantity(bestBid.getQuantity() - reduceQuantity);
+      }
+    }
+  }
+
+  // if there is any remaining quantity, the order must rest
+  if (order.getQuantity() > 0) {
+    restOrder(order);
+    return {order.getId(), Protocol::Status::Success};
+  }
+  return {0, Protocol::Status::Success};
 }
 
-// returns the remaining quantity of the order
-Quantity Orderbook::matchOrder(const Order &incomingOrder) {
-
-  // initialize a const here to avoid the "magic number"
-  const bool doFill = true;
-
-  // if fill or kill timeinforce first check before filling anything
-  if (incomingOrder.getTimeInForce() == TimeInForce::FILL_OR_KILL) {
-    Quantity remainingQuantity =
-        incomingOrder.getSide() == Side::BUY
-            ? matchAgainst(m_asks, incomingOrder, !doFill)
-            : matchAgainst(m_bids, incomingOrder, !doFill);
-    if (remainingQuantity > 0) {
-      return remainingQuantity;
-    }
+Protocol::Status Orderbook::cancelOrder(OrderId orderId) {
+  if (orderId >= m_idToOrderPtr.size()) {
+    std::cout << "invalid order id";
+    return Protocol::Status::BadRequest;
   }
-
-  if (incomingOrder.getSide() == Side::BUY) {
-    return matchAgainst(m_asks, incomingOrder, doFill);
+  std::optional<Level::iterator> orderItOpt = m_idToOrderPtr[orderId];
+  if (!orderItOpt.has_value()) {
+    std::cout << "order id is no longer valid" << std::endl;
+    return Protocol::Status::BadRequest;
   }
-
-  return matchAgainst(m_bids, incomingOrder, doFill);
+  auto orderIt = *orderItOpt;
+  eraseOrder(orderIt);
+  m_idToOrderPtr[orderId] = std::nullopt;
+  return Protocol::Status::Success;
 }
 
-void Orderbook::addOrder(Response::NewOrder &res, Side side, Price price,
-                         Quantity quantity, OrderType orderType,
-                         TimeInForce timeInForce) {
+Protocol::Status Orderbook::modifyOrder(OrderId orderId, Quantity newQuantity) {
+  if (orderId >= m_idToOrderPtr.size()) {
+    std::cout << "invalid order id";
+    return Protocol::Status::BadRequest;
+  }
+  std::optional<Level::iterator> orderItOpt = m_idToOrderPtr[orderId];
+  if (!orderItOpt.has_value()) {
+    std::cout << "order id is no longer valid" << std::endl;
+    return Protocol::Status::BadRequest;
+  }
+  Order& order = **orderItOpt;
+  if (order.getQuantity() < newQuantity || newQuantity == 0) {
+    std::cout << "new quantity must be nonzero and <= old quantity" << std::endl;
+    return Protocol::Status::BadRequest;
+  }
+  order.setQuantity(newQuantity);
+  return Protocol::Status::Success;
+}
 
-  if constexpr (kDebug) {
-    std::cout << "\n<==============NEW ORDER REQUEST==================>\n"
-              << "Side: " << static_cast<int>(side)
-              << "\nPrice: " << static_cast<int>(price)
-              << "\nQuantity: " << quantity
-              << "\nOrderType: " << static_cast<int>(orderType)
-              << "\nTimeInForce: " << static_cast<int>(timeInForce)
-              << std::endl;
+void Orderbook::restOrder(const Order& order) {
+  bool isBid = order.getSide() == Side::Bid;
+
+  Level &pl = isBid ? m_bids[order.getPrice()] : m_asks[order.getPrice()];
+  Level::iterator levelIt = pl.insert(pl.end(), order);
+  if (order.getId() <= m_initialOrderMax) {
+    m_idToOrderPtr[order.getId()] = levelIt;
+  }
+  else {
+    // fallback to push_back when we have run out of space
+    m_idToOrderPtr.push_back(levelIt);
   }
 
+  if (isBid) {
+    if (m_numBids == 0 || m_bestBidPrice < order.getPrice()) {
+      m_bestBidPrice = order.getPrice();
+    }
+    m_numBids++;
+    m_bidsBitset.set(order.getPrice());
+  }
+  else {
+    if (m_numAsks == 0 || m_bestAskPrice > order.getPrice()) {
+      m_bestAskPrice = order.getPrice();
+    }
+    m_numAsks++;
+    m_asksBitset.set(order.getPrice());
+  }
+
+  // we increment the global id counter only after resting an order 
   m_currId++;
-
-  if (side != Side::SELL && side != Side::BUY) {
-    res.status = ResponseStatus::BAD_REQUEST;
-    return;
-  }
-
-  if (orderType == OrderType::LIMIT &&
-      timeInForce != TimeInForce::FILL_OR_KILL &&
-      timeInForce != TimeInForce::IMMEDIATE_OR_CANCEL &&
-      timeInForce != TimeInForce::GOOD_TILL_CANCEL) {
-    res.status = ResponseStatus::BAD_REQUEST;
-    return;
-  }
-
-  if (orderType == OrderType::MARKET &&
-      (timeInForce != TimeInForce::NONE || price != 0)) {
-    res.status = ResponseStatus::BAD_REQUEST;
-    return;
-  }
-
-  if (orderType == OrderType::MARKET) {
-    // set the price and tif for market orders
-    // to the worst price in the opposite side and ioc
-    timeInForce = TimeInForce::IMMEDIATE_OR_CANCEL;
-    std::optional<Price> lastPrice;
-    if (side == Side::BUY) {
-      lastPrice = m_asks.getLastPrice();
-    } else {
-      lastPrice = m_bids.getLastPrice();
-    }
-    // opposite side is empty. set status and return
-    if (lastPrice == std::nullopt) {
-      res.status = ResponseStatus::CANT_FILL;
-      return;
-    }
-    price = *lastPrice;
-  }
-
-  if (price <= 0 || quantity <= 0) {
-    if constexpr (kDebug) {
-      std::cerr << "Error while adding order. Price and quantity must be "
-                   "positive."
-                << std::endl;
-    }
-    res.status = ResponseStatus::BAD_REQUEST;
-    return;
-  }
-
-  Timestamp timestamp = __rdtsc();
-
-  Order order(m_currId, side, price, quantity, timestamp, orderType,
-              timeInForce);
-
-  Quantity remainingQuantity = matchOrder(order);
-
-  // we do not add the order to the orderbook if immediate or cancel
-  // or fill or kill
-  if (timeInForce == TimeInForce::IMMEDIATE_OR_CANCEL) {
-    if (quantity == remainingQuantity) {
-      res.status = ResponseStatus::CANT_FILL;
-    } else if (remainingQuantity > 0) {
-      res.status = ResponseStatus::PARTIAL_FILL;
-    } else {
-      res.status = ResponseStatus::SUCCESS;
-    }
-    return;
-  }
-
-  if (timeInForce == TimeInForce::FILL_OR_KILL) {
-    if (remainingQuantity > 0) {
-      res.status = ResponseStatus::CANT_FILL;
-    } else {
-      res.status = ResponseStatus::SUCCESS;
-    }
-    return;
-  }
-
-  if (remainingQuantity > 0 && quantity != remainingQuantity) {
-    res.status = ResponseStatus::PARTIAL_FILL;
-  } else {
-    res.status = ResponseStatus::SUCCESS;
-  }
-
-  // order is not fok or ioc so we change the quantity to
-  // what remains
-  order.setQuantity(remainingQuantity);
-
-  if (side == Side::BUY) {
-
-    if (remainingQuantity > 0) {
-      m_bids.insert(order, m_activeOrders);
-    }
-
-  } else if (side == Side::SELL) {
-
-    if (remainingQuantity > 0) {
-      m_asks.insert(order, m_activeOrders);
-    }
-  }
-
-  res.newOrderId = m_currId;
 }
 
-bool Orderbook::removeOrder(OrderId orderId) {
-  if (!m_activeOrders.contains(orderId)) {
-    // order does not exist
-    if constexpr (kDebug) {
-      std::cerr << "Error while cancelling order.\norderId: " << orderId
-                << " doesn't exist" << std::endl;
+void Orderbook::eraseOrder(Level::iterator orderIt) {
+  const Order order = *orderIt;
+  const Price price = order.getPrice();
+  m_idToOrderPtr[order.getId()] = std::nullopt;
+  if (order.getSide() == Side::Bid) {
+    m_bids[price].erase(orderIt);
+    m_numBids--;
+
+    if (m_bids[price].empty()) {
+      if (price == m_bestBidPrice && m_numBids > 0) {
+        m_bestBidPrice = m_bidsBitset.unsetAndGetPrev(price);
+      }
+      else {
+        m_bidsBitset.unset(price);
+      }
     }
-    return false;
   }
+  else {
+    m_asks[price].erase(orderIt);
+    m_numAsks--;
 
-  // remove the order from its queue and the activeOrders map
-  auto it = m_activeOrders[orderId];
-  Order order = *it;
-  if (order.getSide() == Side::BUY) {
-    m_bids.erase(it, m_activeOrders);
-  } else if (order.getSide() == Side::SELL) {
-    m_asks.erase(it, m_activeOrders);
-  }
-  return true;
-}
-
-void Orderbook::cancelOrder(Response::CancelOrder &res, OrderId orderId) {
-  if constexpr (kDebug) {
-    std::cout << "\n<==============CANCEL ORDER REQUEST==================>\n"
-              << "OrderId: " << orderId << std::endl;
-  }
-
-  if (!removeOrder(orderId)) {
-    res.status = ResponseStatus::BAD_REQUEST;
-  } else {
-    res.status = ResponseStatus::SUCCESS;
-  }
-}
-
-void Orderbook::modifyOrder(Response::ModifyOrder &res, OrderId orderId,
-                            Quantity newQuantity) {
-  if constexpr (kDebug) {
-    std::cout << "\n<==============MODIFY ORDER REQUEST==================>\n"
-              << "OrderId: " << orderId << "New Quantity: " << newQuantity
-              << std::endl;
-  }
-
-  if (!m_activeOrders.contains(orderId)) {
-    // invalid orderId
-    if constexpr (kDebug) {
-      std::cerr << "Error while modifying order.\norderId: " << orderId
-                << " doesn't exist" << std::endl;
-    }
-    res.status = ResponseStatus::BAD_REQUEST;
-    return;
-  }
-
-  // modify the order in place
-  auto it = m_activeOrders[orderId];
-  Quantity oldQuantity = it->getQuantity();
-  if (oldQuantity < newQuantity || newQuantity == 0) {
-    // newQuantity must be less than the old quantity
-    // and must be a positive number
-    if constexpr (kDebug) {
-      std::cerr << "Error while modifying order: newQuantity must be a less "
-                   "than the old quantity "
-                   "and must be a positive number"
-                << std::endl;
-    }
-    res.status = ResponseStatus::BAD_REQUEST;
-    return;
-  }
-
-  it->setQuantity(newQuantity);
-  res.status = ResponseStatus::SUCCESS;
-}
-
-void Orderbook::printOrderbook() {
-  std::cout << "\n|==========Asks==========|" << std::endl;
-  for (const Order &order : m_asks) {
-    order.display();
-  }
-
-  std::cout << "\n|==========Bids==========|" << std::endl;
-  for (const Order &order : m_bids) {
-    order.display();
-  }
-}
-
-void Orderbook::printTrades() {
-  std::cout << "\n|==========Trades==========|" << std::endl;
-  for (const auto &trade : m_trades) {
-    trade.display();
-  }
-}
-
-namespace {
-void writeToServer(int eventFd) {
-  uint64_t inc = 1;
-  ssize_t n;
-  do {
-    n = ::write(eventFd, &inc, sizeof(inc));
-  } while (n < 0 && errno == EINTR);
-
-  // this should never happen
-  if (n != sizeof(inc)) {
-    ::perror("eventFd write");
-    std::abort();
-  }
-}
-} // namespace
-
-void Orderbook::run() {
-  while (true) {
-    std::optional<ClientRequest> req = m_ctx.incomingRequests.pop();
-    if (req != std::nullopt) {
-      std::visit(overload{[this](const Request::NewOrder &order) {
-                            Response::NewOrder res{};
-                            res.sessionId = order.sessionId;
-                            addOrder(res, order.side, order.price,
-                                     order.quantity, order.orderType,
-                                     order.timeInForce);
-                            m_ctx.outgoingResponses.push(res);
-                            writeToServer(m_ctx.eventFd);
-                          },
-                          [this](const Request::CancelOrder &order) {
-                            Response::CancelOrder res{};
-                            res.sessionId = order.sessionId;
-                            cancelOrder(res, order.orderId);
-                            m_ctx.outgoingResponses.push(res);
-                            writeToServer(m_ctx.eventFd);
-                          },
-                          [this](const Request::ModifyOrder &order) {
-                            Response::ModifyOrder res{};
-                            res.sessionId = order.sessionId;
-                            modifyOrder(res, order.orderId, order.newQuantity);
-                            m_ctx.outgoingResponses.push(res);
-                            writeToServer(m_ctx.eventFd);
-                          }},
-                 *req);
-      if constexpr (kDebug) {
-        printOrderbook();
-        printTrades();
+    if (m_asks[price].empty()) {
+      if (price == m_bestAskPrice && m_numAsks > 0) {
+        m_bestAskPrice = m_asksBitset.unsetAndGetNext(price);
+      }
+      else {
+        m_asksBitset.unset(price);
       }
     }
   }
 }
+

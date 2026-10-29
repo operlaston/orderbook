@@ -4,16 +4,10 @@
 #include <atomic>
 #include <cstddef>
 #include <optional>
+#include <Utils.h>
 
 // need size of cache line to align read and write ptr
 // on separate cache lines (prevent false sharing)
-
-#ifdef __cpp_lib_hardware_interference_size
-static constexpr size_t CACHE_LINE_SIZE =
-    std::hardware_destructive_interference_size;
-#else
-static constexpr size_t CACHE_LINE_SIZE = 64;
-#endif
 
 template <typename T, size_t Capacity> class SpscQueue {
 private:

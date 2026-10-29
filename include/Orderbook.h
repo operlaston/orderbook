@@ -1,48 +1,52 @@
 #pragma once
 
-#include "ResponseTypes.h"
-#include <BookSide.h>
-#include <Order.h>
-#include <ServerEngineContext.h>
-#include <Trade.h>
-#include <Utils.h>
-#include <functional>
+#include "BlockAllocator.h"
+#include "Protocol.h"
+#include "Utils.h"
+#include <cstdint>
 #include <list>
+#include <optional>
+#include <vector>
+#include <Order.h>
+#include <PriceBitset.h>
 
-using PriceLevel = std::list<Order>;
+using Level = std::list<Order, BlockAllocator<Order>>;
 
 class Orderbook {
-private:
-  BookSide<std::greater<Price>> m_bids;
-  BookSide<std::less<Price>> m_asks;
-  std::unordered_map<OrderId, PriceLevel::iterator> m_activeOrders;
-  std::vector<Trade> m_trades;
-  OrderId m_currId = 0; // this is 1 on the first trade
-  ServerEngineContext &m_ctx;
-  Quantity matchOrder(const Order &incomingOrder);
-  bool canFill(const Order &incomingOrder);
-  bool removeOrder(OrderId orderId);
-
-  template <typename Compare>
-  Quantity matchAgainst(BookSide<Compare> &restingBook,
-                        const Order &incomingOrder, const bool doFill);
-
 public:
-  // Orderbook();
-  explicit Orderbook(ServerEngineContext &ctx);
-  void addOrder(Response::NewOrder &res, Side side, Price price,
-                Quantity quantity, OrderType orderType,
-                TimeInForce timeInForce);
-  void cancelOrder(Response::CancelOrder &res, OrderId orderId);
-  void modifyOrder(Response::ModifyOrder &res, OrderId orderId,
-                   Quantity newQuantity);
-  void printOrderbook();
-  void printTrades();
-  const std::vector<Trade> &getTrades() const { return m_trades; }
-  const BookSide<std::greater<Price>> &getBids() const { return m_bids; }
-  const BookSide<std::less<Price>> &getAsks() const { return m_asks; }
-  const std::unordered_map<OrderId, PriceLevel::iterator> &getActiveOrders() {
-    return m_activeOrders;
+  static constexpr uint64_t MAX_PRICE = 100000;
+
+  explicit Orderbook(uint64_t blockCount, uint32_t initialOrderMax); // # of blocks to allocate
+  std::pair<OrderId, Protocol::Status> addOrder(Side side, Price price, Quantity quantity);
+  Protocol::Status cancelOrder(OrderId orderId);
+  Protocol::Status modifyOrder(OrderId orderId, Quantity newQuantity);
+  const std::vector<Level>& getBids() const { return m_bids; }
+  const std::vector<Level>& getAsks() const { return m_asks; }
+  const PriceBitset& getBidsBitset() const { return m_bidsBitset; }
+  const PriceBitset& getAsksBitset() const { return m_asksBitset; }
+  const std::vector<std::optional<Level::iterator>>& getIdMap() const { return m_idToOrderPtr; }
+  std::optional<Price> bestBid() const {
+    return m_numBids > 0 ? std::optional<Price>(m_bestBidPrice) : std::nullopt;
   }
-  void run();
+  std::optional<Price> bestAsk() const {
+    return m_numAsks > 0 ? std::optional<Price>(m_bestAskPrice) : std::nullopt;
+  }
+
+private:
+  FixedPool m_memPool;
+  BlockAllocator<Order> m_allocator;
+  std::vector<Level> m_bids;
+  std::vector<Level> m_asks;
+  const uint32_t m_initialOrderMax;
+  std::vector<std::optional<Level::iterator>> m_idToOrderPtr;
+  PriceBitset m_bidsBitset;
+  PriceBitset m_asksBitset;
+  uint32_t m_bestBidPrice;
+  uint32_t m_bestAskPrice;
+  uint64_t m_numBids;
+  uint64_t m_numAsks;
+  OrderId m_currId{1};
+
+  void restOrder(const Order& order);
+  void eraseOrder(Level::iterator orderIt);
 };

@@ -1,566 +1,838 @@
+#include "Protocol.h"
 #include <gtest/gtest.h>
 
-#include "GlobalConsts.h"
-#include "OrderType.h"
-#include "Orderbook.h"
-#include "ServerEngineContext.h"
-#include "Side.h"
-#include "TimeInForce.h"
+#include <Order.h>
+#include <Orderbook.h>
+#include <Utils.h>
+
+#include <tuple>
+#include <utility>
+#include <vector>
+
+using Protocol::Status;
+
+// (id, quantity) of each order in a level, front of the queue first
+using LevelContents = std::vector<std::pair<OrderId, Quantity>>;
+
+// every resting order in the book as (side, price, id, quantity), used to check
+// that rejected requests leave the book untouched
+using BookSnapshot = std::vector<std::tuple<Side, Price, OrderId, Quantity>>;
+
+LevelContents levelContents(const Level& level) {
+  LevelContents out;
+  for (const Order& o : level) {
+    out.emplace_back(o.getId(), o.getQuantity());
+  }
+  return out;
+}
+
+BookSnapshot snapshot(const Orderbook& book) {
+  BookSnapshot out;
+  for (Price p = 0; p <= Orderbook::MAX_PRICE; p++) {
+    for (const Order& o : book.getBids()[p]) {
+      out.emplace_back(Side::Bid, p, o.getId(), o.getQuantity());
+    }
+    for (const Order& o : book.getAsks()[p]) {
+      out.emplace_back(Side::Ask, p, o.getId(), o.getQuantity());
+    }
+  }
+  return out;
+}
 
 class OrderbookTest : public testing::Test {
 protected:
-  ServerEngineContext ctx;
   Orderbook ob;
-  Response::NewOrder lastRes{};
 
-  OrderbookTest() : ob(ctx) {}
+  OrderbookTest() : ob(10, 10) {}
   ~OrderbookTest() override = default;
 
-  void limitBidGtc(Price price, Quantity quantity) {
-    ob.addOrder(lastRes, Side::BUY, price, quantity, OrderType::LIMIT,
-                TimeInForce::GOOD_TILL_CANCEL);
+  std::pair<OrderId, Status> bid(Price price, Quantity quantity) {
+    return ob.addOrder(Side::Bid, price, quantity);
   }
 
-  void limitAskGtc(Price price, Quantity quantity) {
-    ob.addOrder(lastRes, Side::SELL, price, quantity, OrderType::LIMIT,
-                TimeInForce::GOOD_TILL_CANCEL);
+  std::pair<OrderId, Status> ask(Price price, Quantity quantity) {
+    return ob.addOrder(Side::Ask, price, quantity);
   }
 
-  void marketBid(Quantity quantity) {
-    ob.addOrder(lastRes, Side::BUY, 0, quantity, OrderType::MARKET,
-                TimeInForce::NONE);
+  const Order& bidLevelTop(Price price) {
+    return ob.getBids()[price].front();
   }
 
-  void marketAsk(Quantity quantity) {
-    ob.addOrder(lastRes, Side::SELL, 0, quantity, OrderType::MARKET,
-                TimeInForce::NONE);
+  const Order& askLevelTop(Price price) {
+    return ob.getAsks()[price].front();
   }
 
-  void limitBidFok(Price price, Quantity quantity) {
-    ob.addOrder(lastRes, Side::BUY, price, quantity, OrderType::LIMIT,
-                TimeInForce::FILL_OR_KILL);
+  size_t numBidsAtLevel(Price price) {
+    return ob.getBids()[price].size();
   }
 
-  void limitBidIoc(Price price, Quantity quantity) {
-    ob.addOrder(lastRes, Side::BUY, price, quantity, OrderType::LIMIT,
-                TimeInForce::IMMEDIATE_OR_CANCEL);
+  size_t numAsksAtLevel(Price price) {
+    return ob.getAsks()[price].size();
   }
 
-  Order getTopBid() { return *ob.getBids().begin(); }
-  Order getTopAsk() { return *ob.getAsks().begin(); }
-  Trade getLastTrade() { return ob.getTrades().back(); }
+  LevelContents bidsAt(Price price) {
+    return levelContents(ob.getBids()[price]);
+  }
+
+  LevelContents asksAt(Price price) {
+    return levelContents(ob.getAsks()[price]);
+  }
+
+  std::optional<Level::iterator> getOrderIter(OrderId orderId) {
+    return ob.getIdMap()[orderId];
+  }
+
+  // checks the id map points at a resting order with this id and quantity
+  void expectResting(OrderId id, Side side, Price price, Quantity quantity) {
+    ASSERT_LT(id, ob.getIdMap().size());
+    auto it = getOrderIter(id);
+    ASSERT_TRUE(it.has_value()) << "order " << id << " is not in the id map";
+    const Order& o = **it;
+    EXPECT_EQ(o.getId(), id);
+    EXPECT_EQ(o.getSide(), side);
+    EXPECT_EQ(o.getPrice(), price);
+    EXPECT_EQ(o.getQuantity(), quantity);
+  }
+
+  void expectNotResting(OrderId id) {
+    if (id < ob.getIdMap().size()) {
+      EXPECT_FALSE(getOrderIter(id).has_value()) << "order " << id << " is still in the id map";
+    }
+  }
+
+  void expectNotCrossed() {
+    if (ob.bestBid() && ob.bestAsk()) {
+      EXPECT_LT(*ob.bestBid(), *ob.bestAsk());
+    }
+  }
 };
 
+const std::pair<OrderId, Status> kFilled{0, Status::Success};
+const std::pair<OrderId, Status> kRejected{0, Status::BadRequest};
+
+std::pair<OrderId, Status> rested(OrderId id) {
+  return {id, Status::Success};
+}
+
+// ---------------------------------------------------------------------------
+// Add / match
+// ---------------------------------------------------------------------------
+
 TEST_F(OrderbookTest, BidsCanBePlaced) {
-  limitBidGtc(100.0, 10);
+  EXPECT_EQ(bid(100, 10), rested(1));
 
-  // make sure book is properly updated
-  ASSERT_EQ(lastRes.status, ResponseStatus::SUCCESS);
-  ASSERT_EQ(ob.getBids().size(), 1u);
-  Order topBid = getTopBid();
-  EXPECT_DOUBLE_EQ(topBid.getPrice(), 100.0);
-  EXPECT_EQ(topBid.getQuantity(), 10u);
-
-  // make sure activeOrders is properly updated
-  EXPECT_EQ(ob.getActiveOrders().size(), 1u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(lastRes.newOrderId));
+  ASSERT_EQ(numBidsAtLevel(100), 1u);
+  EXPECT_EQ(bidLevelTop(100).getQuantity(), 10u);
+  EXPECT_EQ(ob.bestBid(), 100u);
+  EXPECT_EQ(ob.bestAsk(), std::nullopt);
+  EXPECT_TRUE(ob.getBidsBitset().get(100));
+  expectResting(1, Side::Bid, 100, 10);
 }
 
 TEST_F(OrderbookTest, AsksCanBePlaced) {
-  limitAskGtc(100.0, 10);
+  EXPECT_EQ(ask(100, 10), rested(1));
 
-  // make sure book is properly updated
-  ASSERT_EQ(lastRes.status, ResponseStatus::SUCCESS);
-  ASSERT_EQ(ob.getAsks().size(), 1u);
-  Order topAsk = getTopAsk();
-  EXPECT_DOUBLE_EQ(topAsk.getPrice(), 100.0);
-  EXPECT_EQ(topAsk.getQuantity(), 10u);
-
-  // make sure activeOrders is properly updated
-  EXPECT_EQ(ob.getActiveOrders().size(), 1u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(lastRes.newOrderId));
+  ASSERT_EQ(numAsksAtLevel(100), 1u);
+  EXPECT_EQ(askLevelTop(100).getQuantity(), 10u);
+  EXPECT_EQ(ob.bestAsk(), 100u);
+  EXPECT_EQ(ob.bestBid(), std::nullopt);
+  EXPECT_TRUE(ob.getAsksBitset().get(100));
+  expectResting(1, Side::Ask, 100, 10);
 }
 
-TEST_F(OrderbookTest, IncomingAskMatchedToBid) {
-  limitBidGtc(100.0, 10);
-  limitAskGtc(100.0, 10);
+TEST_F(OrderbookTest, BidPartialFills) {
+  EXPECT_EQ(ask(100, 10), rested(1));
+  EXPECT_EQ(bid(110, 15), rested(2));
 
-  ASSERT_EQ(ob.getTrades().size(), 1u);
-  EXPECT_DOUBLE_EQ(getLastTrade().getPrice(), 100.0);
-  EXPECT_EQ(getLastTrade().getQuantity(), 10u);
-  EXPECT_EQ(getLastTrade().getBidId(), 1u);
-  EXPECT_EQ(getLastTrade().getAskId(), 2u);
-
-  // there should be no resting orders
-  EXPECT_TRUE(ob.getActiveOrders().empty());
+  EXPECT_EQ(numAsksAtLevel(100), 0u);
+  EXPECT_FALSE(ob.getAsksBitset().get(100));
+  EXPECT_EQ(bidsAt(110), (LevelContents{{2, 5}}));
+  EXPECT_EQ(ob.bestBid(), 110u);
+  EXPECT_EQ(ob.bestAsk(), std::nullopt);
+  expectNotResting(1);
+  expectResting(2, Side::Bid, 110, 5);
 }
 
-TEST_F(OrderbookTest, IncomingBidMatchedToAsk) {
-  limitAskGtc(100.0, 10);
-  limitBidGtc(100.0, 10);
+TEST_F(OrderbookTest, AskPartialFills) {
+  EXPECT_EQ(bid(110, 10), rested(1));
+  EXPECT_EQ(ask(100, 15), rested(2));
 
-  ASSERT_EQ(ob.getTrades().size(), 1u);
-  EXPECT_DOUBLE_EQ(getLastTrade().getPrice(), 100.0);
-  EXPECT_EQ(getLastTrade().getQuantity(), 10u);
-  EXPECT_EQ(getLastTrade().getAskId(), 1u);
-  EXPECT_EQ(getLastTrade().getBidId(), 2u);
-
-  // there should be no resting orders
-  EXPECT_TRUE(ob.getActiveOrders().empty());
+  EXPECT_EQ(numBidsAtLevel(110), 0u);
+  EXPECT_FALSE(ob.getBidsBitset().get(110));
+  EXPECT_EQ(asksAt(100), (LevelContents{{2, 5}}));
+  EXPECT_EQ(ob.bestAsk(), 100u);
+  EXPECT_EQ(ob.bestBid(), std::nullopt);
+  expectNotResting(1);
+  expectResting(2, Side::Ask, 100, 5);
 }
 
-TEST_F(OrderbookTest, LimitOrderWithNoMatchesRests) {
+TEST_F(OrderbookTest, BidFullFills) {
+  EXPECT_EQ(ask(100, 10), rested(1));
+  EXPECT_EQ(bid(100, 10), kFilled);
 
-  limitBidGtc(100.0, 1);
-  limitAskGtc(101.0, 1);
-
-  EXPECT_TRUE(ob.getTrades().empty());
-
-  ASSERT_EQ(ob.getBids().size(), 1u);
-  Order topBid = getTopBid();
-  EXPECT_DOUBLE_EQ(topBid.getPrice(), 100.0);
-  EXPECT_DOUBLE_EQ(topBid.getQuantity(), 1);
-
-  ASSERT_EQ(ob.getAsks().size(), 1u);
-  Order topAsk = getTopAsk();
-  EXPECT_DOUBLE_EQ(topAsk.getPrice(), 101.0);
-  EXPECT_DOUBLE_EQ(topAsk.getQuantity(), 1);
-
-  EXPECT_EQ(ob.getActiveOrders().size(), 2u);
+  EXPECT_EQ(numAsksAtLevel(100), 0u);
+  EXPECT_EQ(numBidsAtLevel(100), 0u);
+  EXPECT_EQ(ob.bestBid(), std::nullopt);
+  EXPECT_EQ(ob.bestAsk(), std::nullopt);
+  expectNotResting(1);
 }
 
-TEST_F(OrderbookTest, LargeBidPartialFills) {
-  limitAskGtc(100.0, 2);
-  limitBidGtc(105.0, 3);
+TEST_F(OrderbookTest, AskFullFills) {
+  EXPECT_EQ(bid(100, 10), rested(1));
+  EXPECT_EQ(ask(100, 10), kFilled);
 
-  EXPECT_EQ(lastRes.status, ResponseStatus::PARTIAL_FILL);
-  EXPECT_EQ(ob.getTrades().size(), 1u);
-  EXPECT_EQ(ob.getAsks().size(), 0u);
-  ASSERT_EQ(ob.getBids().size(), 1u);
-  Order topBid = getTopBid();
-  EXPECT_DOUBLE_EQ(topBid.getPrice(), 105.0);
-  EXPECT_EQ(topBid.getQuantity(), 1u);
-
-  // make sure the resting bid is present in active orders
-  EXPECT_EQ(ob.getActiveOrders().size(), 1u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(lastRes.newOrderId));
+  EXPECT_EQ(numBidsAtLevel(100), 0u);
+  EXPECT_EQ(numAsksAtLevel(100), 0u);
+  EXPECT_EQ(ob.bestBid(), std::nullopt);
+  EXPECT_EQ(ob.bestAsk(), std::nullopt);
+  expectNotResting(1);
 }
 
-TEST_F(OrderbookTest, LargeAskPartialFills) {
-  // larger quantity ask to test partial fill
-  limitBidGtc(105.0, 2);
-  limitAskGtc(100.0, 3);
+TEST_F(OrderbookTest, IncomingSmallerThanRestingLeavesRemainder) {
+  EXPECT_EQ(ask(100, 10), rested(1));
+  EXPECT_EQ(bid(100, 4), kFilled);
 
-  EXPECT_EQ(lastRes.status, ResponseStatus::PARTIAL_FILL);
-  EXPECT_EQ(ob.getTrades().size(), 1u);
-  EXPECT_EQ(ob.getBids().size(), 0u);
-  ASSERT_EQ(ob.getAsks().size(), 1u);
-  Order topAsk = getTopAsk();
-  EXPECT_DOUBLE_EQ(topAsk.getPrice(), 100.0);
-  EXPECT_EQ(topAsk.getQuantity(), 1u);
-
-  // make sure the resting ask is present in active orders
-  EXPECT_EQ(ob.getActiveOrders().size(), 1u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(lastRes.newOrderId));
+  EXPECT_EQ(asksAt(100), (LevelContents{{1, 6}}));
+  EXPECT_EQ(ob.bestAsk(), 100u);
+  expectResting(1, Side::Ask, 100, 6);
 }
 
-TEST_F(OrderbookTest, FullFillBidPricePriorityRespected) {
-  // asks placed out of order
-  limitAskGtc(105.0, 1);
-  OrderId askId1 = lastRes.newOrderId;
-  limitAskGtc(100.0, 1);
-  limitAskGtc(102.0, 2);
-  OrderId askId2 = lastRes.newOrderId;
-  limitBidGtc(110.0, 2);
+TEST_F(OrderbookTest, BidSweepsAsksLowestFirst) {
+  // added out of price order so the sweep order can't come from insertion order
+  EXPECT_EQ(ask(102, 10), rested(1));
+  EXPECT_EQ(ask(100, 10), rested(2));
+  EXPECT_EQ(ask(101, 5), rested(3));
+  EXPECT_EQ(bid(110, 30), rested(4));
 
-  // should fill 100 for quantity 1 and 102 for quantity 1
-  EXPECT_EQ(lastRes.status, ResponseStatus::SUCCESS);
-  // check trades were logged properly
-  ASSERT_EQ(ob.getTrades().size(), 2u);
-  EXPECT_EQ(ob.getTrades()[0].getPrice(), 100.0);
-  EXPECT_EQ(ob.getTrades()[1].getPrice(), 102.0);
-  EXPECT_EQ(ob.getTrades()[0].getQuantity(), 1u);
-  EXPECT_EQ(ob.getTrades()[1].getQuantity(), 1u);
-
-  // check correctness of book state
-  EXPECT_TRUE(ob.getBids().empty());
-  ASSERT_EQ(ob.getAsks().size(), 2u);
-  auto it = ob.getAsks().begin();
-  EXPECT_EQ(it->getPrice(), 102.0);
-  EXPECT_EQ(it->getQuantity(), 1u);
-  it++;
-  EXPECT_EQ(it->getPrice(), 105.0);
-  EXPECT_EQ(it->getQuantity(), 1u);
-
-  // check activeOrders
-  EXPECT_EQ(ob.getActiveOrders().size(), 2u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(askId1));
-  EXPECT_TRUE(ob.getActiveOrders().contains(askId2));
+  EXPECT_EQ(numAsksAtLevel(100), 0u);
+  EXPECT_EQ(numAsksAtLevel(101), 0u);
+  EXPECT_EQ(numAsksAtLevel(102), 0u);
+  EXPECT_EQ(bidsAt(110), (LevelContents{{4, 5}}));
+  EXPECT_EQ(ob.bestAsk(), std::nullopt);
+  EXPECT_EQ(ob.bestBid(), 110u);
 }
 
-TEST_F(OrderbookTest, FullFillAskPricePriorityRespected) {
-  // bids placed out of order
-  limitBidGtc(100.0, 1);
-  OrderId bidId1 = lastRes.newOrderId;
-  limitBidGtc(105.0, 1);
-  limitBidGtc(102.0, 2);
-  OrderId bidId2 = lastRes.newOrderId;
-  limitAskGtc(90.0, 2);
+TEST_F(OrderbookTest, BidSweepStopsPartwayThroughLevel) {
+  EXPECT_EQ(ask(102, 10), rested(1));
+  EXPECT_EQ(ask(100, 10), rested(2));
+  EXPECT_EQ(ask(101, 5), rested(3));
+  // takes all of 100 and 101, then 3 of the 10 at 102
+  EXPECT_EQ(bid(105, 18), kFilled);
 
-  // should fill 105 for quantity 1 and 102 for quantity 1
-  EXPECT_EQ(lastRes.status, ResponseStatus::SUCCESS);
-  // check trades were logged properly
-  ASSERT_EQ(ob.getTrades().size(), 2u);
-  EXPECT_EQ(ob.getTrades()[0].getPrice(), 105.0);
-  EXPECT_EQ(ob.getTrades()[1].getPrice(), 102.0);
-  EXPECT_EQ(ob.getTrades()[0].getQuantity(), 1u);
-  EXPECT_EQ(ob.getTrades()[1].getQuantity(), 1u);
-
-  // check correctness of book state
-  EXPECT_TRUE(ob.getAsks().empty());
-  ASSERT_EQ(ob.getBids().size(), 2u);
-  auto it = ob.getBids().begin();
-  EXPECT_EQ(it->getPrice(), 102.0);
-  EXPECT_EQ(it->getQuantity(), 1u);
-  it++;
-  EXPECT_EQ(it->getPrice(), 100.0);
-  EXPECT_EQ(it->getQuantity(), 1u);
-
-  // check activeOrders
-  EXPECT_EQ(ob.getActiveOrders().size(), 2u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(bidId1));
-  EXPECT_TRUE(ob.getActiveOrders().contains(bidId2));
+  EXPECT_EQ(numAsksAtLevel(100), 0u);
+  EXPECT_EQ(numAsksAtLevel(101), 0u);
+  EXPECT_EQ(asksAt(102), (LevelContents{{1, 7}}));
+  EXPECT_EQ(ob.bestAsk(), 102u);
+  EXPECT_EQ(ob.bestBid(), std::nullopt);
 }
 
-TEST_F(OrderbookTest, MarketOrderBidFilled) {
-  // check if market bid fills correctly
-  limitAskGtc(105.0, 1);
-  OrderId askId = lastRes.newOrderId;
-  limitAskGtc(100.0, 1);
-  marketBid(1);
+TEST_F(OrderbookTest, AskSweepsBidsHighestFirst) {
+  EXPECT_EQ(bid(108, 10), rested(1));
+  EXPECT_EQ(bid(110, 10), rested(2));
+  EXPECT_EQ(bid(109, 5), rested(3));
+  EXPECT_EQ(ask(100, 30), rested(4));
 
-  ASSERT_EQ(ob.getAsks().size(), 1u);
-  Order topAsk = getTopAsk();
-  EXPECT_DOUBLE_EQ(topAsk.getPrice(), 105.0);
-  EXPECT_EQ(topAsk.getQuantity(), 1u);
-  EXPECT_EQ(ob.getTrades().size(), 1u);
-  EXPECT_DOUBLE_EQ(ob.getTrades().front().getPrice(), 100.0);
-  EXPECT_EQ(ob.getTrades().front().getQuantity(), 1u);
-
-  // check activeOrders
-  EXPECT_EQ(ob.getActiveOrders().size(), 1u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(askId));
+  EXPECT_EQ(numBidsAtLevel(110), 0u);
+  EXPECT_EQ(numBidsAtLevel(109), 0u);
+  EXPECT_EQ(numBidsAtLevel(108), 0u);
+  EXPECT_EQ(asksAt(100), (LevelContents{{4, 5}}));
+  EXPECT_EQ(ob.bestBid(), std::nullopt);
+  EXPECT_EQ(ob.bestAsk(), 100u);
 }
 
-TEST_F(OrderbookTest, MarketOrderAskFilled) {
-  limitBidGtc(100.0, 1);
-  OrderId bidId = lastRes.newOrderId;
-  limitBidGtc(105.0, 1);
-  marketAsk(1);
+TEST_F(OrderbookTest, AskSweepStopsPartwayThroughLevel) {
+  EXPECT_EQ(bid(108, 10), rested(1));
+  EXPECT_EQ(bid(110, 10), rested(2));
+  EXPECT_EQ(bid(109, 5), rested(3));
+  // takes all of 110 and 109, then 3 of the 10 at 108
+  EXPECT_EQ(ask(100, 18), kFilled);
 
-  ASSERT_EQ(ob.getBids().size(), 1u);
-  Order topBid = getTopBid();
-  EXPECT_DOUBLE_EQ(topBid.getPrice(), 100.0);
-  EXPECT_EQ(topBid.getQuantity(), 1u);
-  EXPECT_EQ(ob.getTrades().size(), 1u);
-  EXPECT_DOUBLE_EQ(ob.getTrades().front().getPrice(), 105.0);
-  EXPECT_EQ(ob.getTrades().front().getQuantity(), 1u);
-
-  // check activeOrders
-  EXPECT_EQ(ob.getActiveOrders().size(), 1u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(bidId));
+  EXPECT_EQ(numBidsAtLevel(110), 0u);
+  EXPECT_EQ(numBidsAtLevel(109), 0u);
+  EXPECT_EQ(bidsAt(108), (LevelContents{{1, 7}}));
+  EXPECT_EQ(ob.bestBid(), 108u);
+  EXPECT_EQ(ob.bestAsk(), std::nullopt);
 }
 
-TEST_F(OrderbookTest, FullFillBidTimePriorityRespected) {
-  // two resting bids at the same price; the first placed must fill first
-  limitBidGtc(100.0, 1);
-  OrderId firstBid = lastRes.newOrderId;
-  limitBidGtc(100.0, 1);
-  OrderId secondBid = lastRes.newOrderId;
+TEST_F(OrderbookTest, BidDoesNotTradeThroughItsLimit) {
+  EXPECT_EQ(ask(100, 5), rested(1));
+  EXPECT_EQ(ask(105, 5), rested(2));
+  EXPECT_EQ(bid(103, 20), rested(3));
 
-  // incoming ask only crosses one unit
-  limitAskGtc(100.0, 1);
-
-  ASSERT_EQ(ob.getTrades().size(), 1u);
-  EXPECT_EQ(getLastTrade().getBidId(), firstBid);
-  EXPECT_DOUBLE_EQ(getLastTrade().getPrice(), 100.0);
-  EXPECT_EQ(getLastTrade().getQuantity(), 1u);
-
-  // the later bid is the one left resting
-  ASSERT_EQ(ob.getBids().size(), 1u);
-  EXPECT_EQ(getTopBid().getId(), secondBid);
-  EXPECT_EQ(ob.getActiveOrders().size(), 1u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(secondBid));
-  EXPECT_FALSE(ob.getActiveOrders().contains(firstBid));
+  EXPECT_EQ(numAsksAtLevel(100), 0u);
+  EXPECT_EQ(asksAt(105), (LevelContents{{2, 5}}));
+  EXPECT_EQ(bidsAt(103), (LevelContents{{3, 15}}));
+  EXPECT_EQ(ob.bestBid(), 103u);
+  EXPECT_EQ(ob.bestAsk(), 105u);
+  expectNotCrossed();
 }
 
-TEST_F(OrderbookTest, FullFillAskTimePriorityRespected) {
-  // two resting asks at the same price; the first placed must fill first
-  limitAskGtc(100.0, 1);
-  OrderId firstAsk = lastRes.newOrderId;
-  limitAskGtc(100.0, 1);
-  OrderId secondAsk = lastRes.newOrderId;
+TEST_F(OrderbookTest, AskDoesNotTradeThroughItsLimit) {
+  EXPECT_EQ(bid(105, 5), rested(1));
+  EXPECT_EQ(bid(100, 5), rested(2));
+  EXPECT_EQ(ask(103, 20), rested(3));
 
-  // incoming bid only crosses one unit
-  limitBidGtc(100.0, 1);
-
-  ASSERT_EQ(ob.getTrades().size(), 1u);
-  EXPECT_EQ(getLastTrade().getAskId(), firstAsk);
-  EXPECT_DOUBLE_EQ(getLastTrade().getPrice(), 100.0);
-  EXPECT_EQ(getLastTrade().getQuantity(), 1u);
-
-  // the later ask is the one left resting
-  ASSERT_EQ(ob.getAsks().size(), 1u);
-  EXPECT_EQ(getTopAsk().getId(), secondAsk);
-  EXPECT_EQ(ob.getActiveOrders().size(), 1u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(secondAsk));
-  EXPECT_FALSE(ob.getActiveOrders().contains(firstAsk));
+  EXPECT_EQ(numBidsAtLevel(105), 0u);
+  EXPECT_EQ(bidsAt(100), (LevelContents{{2, 5}}));
+  EXPECT_EQ(asksAt(103), (LevelContents{{3, 15}}));
+  EXPECT_EQ(ob.bestBid(), 100u);
+  EXPECT_EQ(ob.bestAsk(), 103u);
+  expectNotCrossed();
 }
 
-TEST_F(OrderbookTest, IncomingBidCrossesMultiplePriceLevels) {
-  limitAskGtc(100.0, 1);
-  limitAskGtc(101.0, 1);
-  limitAskGtc(102.0, 1);
+TEST_F(OrderbookTest, BidBelowBestAskDoesNotMatch) {
+  EXPECT_EQ(ask(100, 10), rested(1));
+  EXPECT_EQ(bid(99, 10), rested(2));
 
-  // one bid that sweeps all three ask levels and rests the remainder
-  limitBidGtc(103.0, 5);
-
-  EXPECT_EQ(lastRes.status, ResponseStatus::PARTIAL_FILL);
-  ASSERT_EQ(ob.getTrades().size(), 3u);
-  EXPECT_DOUBLE_EQ(ob.getTrades()[0].getPrice(), 100.0);
-  EXPECT_DOUBLE_EQ(ob.getTrades()[1].getPrice(), 101.0);
-  EXPECT_DOUBLE_EQ(ob.getTrades()[2].getPrice(), 102.0);
-
-  EXPECT_TRUE(ob.getAsks().empty());
-  ASSERT_EQ(ob.getBids().size(), 1u);
-  EXPECT_DOUBLE_EQ(getTopBid().getPrice(), 103.0);
-  EXPECT_EQ(getTopBid().getQuantity(), 2u);
-
-  EXPECT_EQ(ob.getActiveOrders().size(), 1u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(lastRes.newOrderId));
+  EXPECT_EQ(asksAt(100), (LevelContents{{1, 10}}));
+  EXPECT_EQ(bidsAt(99), (LevelContents{{2, 10}}));
+  EXPECT_EQ(ob.bestBid(), 99u);
+  EXPECT_EQ(ob.bestAsk(), 100u);
+  expectNotCrossed();
 }
 
-TEST_F(OrderbookTest, IncomingAskCrossesMultiplePriceLevels) {
-  limitBidGtc(102.0, 1);
-  limitBidGtc(101.0, 1);
-  limitBidGtc(100.0, 1);
+TEST_F(OrderbookTest, AskAboveBestBidDoesNotMatch) {
+  EXPECT_EQ(bid(100, 10), rested(1));
+  EXPECT_EQ(ask(101, 10), rested(2));
 
-  // one ask that sweeps all three bid levels and rests the remainder
-  limitAskGtc(100.0, 5);
-
-  EXPECT_EQ(lastRes.status, ResponseStatus::PARTIAL_FILL);
-  ASSERT_EQ(ob.getTrades().size(), 3u);
-  EXPECT_DOUBLE_EQ(ob.getTrades()[0].getPrice(), 102.0);
-  EXPECT_DOUBLE_EQ(ob.getTrades()[1].getPrice(), 101.0);
-  EXPECT_DOUBLE_EQ(ob.getTrades()[2].getPrice(), 100.0);
-
-  EXPECT_TRUE(ob.getBids().empty());
-  ASSERT_EQ(ob.getAsks().size(), 1u);
-  EXPECT_DOUBLE_EQ(getTopAsk().getPrice(), 100.0);
-  EXPECT_EQ(getTopAsk().getQuantity(), 2u);
-
-  EXPECT_EQ(ob.getActiveOrders().size(), 1u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(lastRes.newOrderId));
+  EXPECT_EQ(bidsAt(100), (LevelContents{{1, 10}}));
+  EXPECT_EQ(asksAt(101), (LevelContents{{2, 10}}));
+  EXPECT_EQ(ob.bestBid(), 100u);
+  EXPECT_EQ(ob.bestAsk(), 101u);
+  expectNotCrossed();
 }
 
-TEST_F(OrderbookTest, MarketBidCantFillAgainstEmptyBook) {
-  marketBid(5);
+TEST_F(OrderbookTest, FifoWithinAskLevel) {
+  EXPECT_EQ(ask(100, 10), rested(1));
+  EXPECT_EQ(ask(100, 10), rested(2));
+  EXPECT_EQ(bid(100, 15), kFilled);
 
-  EXPECT_EQ(lastRes.status, ResponseStatus::CANT_FILL);
-  EXPECT_TRUE(ob.getTrades().empty());
-  EXPECT_TRUE(ob.getBids().empty());
-  EXPECT_TRUE(ob.getAsks().empty());
-  EXPECT_TRUE(ob.getActiveOrders().empty());
+  // the first ask is filled completely before the second is touched
+  EXPECT_EQ(asksAt(100), (LevelContents{{2, 5}}));
+  expectNotResting(1);
+  expectResting(2, Side::Ask, 100, 5);
 }
 
-TEST_F(OrderbookTest, MarketAskCantFillAgainstEmptyBook) {
-  marketAsk(5);
+TEST_F(OrderbookTest, FifoWithinBidLevel) {
+  EXPECT_EQ(bid(100, 10), rested(1));
+  EXPECT_EQ(bid(100, 10), rested(2));
+  EXPECT_EQ(bid(100, 10), rested(3));
+  EXPECT_EQ(ask(100, 5), kFilled);
 
-  EXPECT_EQ(lastRes.status, ResponseStatus::CANT_FILL);
-  EXPECT_TRUE(ob.getTrades().empty());
-  EXPECT_TRUE(ob.getBids().empty());
-  EXPECT_TRUE(ob.getAsks().empty());
-  EXPECT_TRUE(ob.getActiveOrders().empty());
+  EXPECT_EQ(bidsAt(100), (LevelContents{{1, 5}, {2, 10}, {3, 10}}));
 }
 
-TEST_F(OrderbookTest, FillOrKillDoesNotPartiallyFillOrRest) {
-  limitAskGtc(100.0, 5);
-  OrderId askId = lastRes.newOrderId;
+TEST_F(OrderbookTest, NewOrdersJoinBackOfLevel) {
+  EXPECT_EQ(ask(100, 10), rested(1));
+  EXPECT_EQ(ask(100, 10), rested(2));
+  EXPECT_EQ(bid(100, 5), kFilled);    // order 1 now has 5 left but keeps its place
+  EXPECT_EQ(ask(100, 10), rested(3));
 
-  // cannot be filled completely -> must be killed entirely
-  limitBidFok(100.0, 10);
-
-  EXPECT_EQ(lastRes.status, ResponseStatus::CANT_FILL);
-  EXPECT_TRUE(ob.getTrades().empty());
-  EXPECT_TRUE(ob.getBids().empty());
-
-  // the resting ask must be untouched
-  ASSERT_EQ(ob.getAsks().size(), 1u);
-  EXPECT_EQ(getTopAsk().getQuantity(), 5u);
-  EXPECT_EQ(ob.getActiveOrders().size(), 1u);
-  EXPECT_TRUE(ob.getActiveOrders().contains(askId));
+  EXPECT_EQ(asksAt(100), (LevelContents{{1, 5}, {2, 10}, {3, 10}}));
 }
 
-TEST_F(OrderbookTest, FillOrKillCompletelyFillsWhenPossible) {
-  limitAskGtc(100.0, 5);
-  limitAskGtc(101.0, 5);
+TEST_F(OrderbookTest, ReturnedIdsSkipFullyFilledOrders) {
+  EXPECT_EQ(ask(100, 10), rested(1));
+  EXPECT_EQ(bid(100, 10), kFilled);   // fills in full, doesn't use up id 2
+  EXPECT_EQ(bid(90, 10), rested(2));
+  EXPECT_EQ(ask(95, 5), rested(3));
+  EXPECT_EQ(bid(95, 5), kFilled);
+  EXPECT_EQ(bid(95, 1), rested(4));
 
-  limitBidFok(101.0, 10);
-
-  EXPECT_EQ(lastRes.status, ResponseStatus::SUCCESS);
-  ASSERT_EQ(ob.getTrades().size(), 2u);
-  EXPECT_DOUBLE_EQ(ob.getTrades()[0].getPrice(), 100.0);
-  EXPECT_DOUBLE_EQ(ob.getTrades()[1].getPrice(), 101.0);
-  EXPECT_EQ(ob.getTrades()[0].getQuantity(), 5u);
-  EXPECT_EQ(ob.getTrades()[1].getQuantity(), 5u);
-
-  // nothing rests: the FoK order is gone and both asks are consumed
-  EXPECT_TRUE(ob.getAsks().empty());
-  EXPECT_TRUE(ob.getBids().empty());
-  EXPECT_TRUE(ob.getActiveOrders().empty());
+  expectResting(2, Side::Bid, 90, 10);
+  expectResting(4, Side::Bid, 95, 1);
 }
 
-TEST_F(OrderbookTest, ImmediateOrCancelDoesNotRest) {
-  limitAskGtc(100.0, 3);
+TEST_F(OrderbookTest, PriceAtMaxIsAccepted) {
+  EXPECT_EQ(ask(Orderbook::MAX_PRICE, 10), rested(1));
+  EXPECT_EQ(ob.bestAsk(), Orderbook::MAX_PRICE);
+  EXPECT_TRUE(ob.getAsksBitset().get(Orderbook::MAX_PRICE));
 
-  // more than can be filled; the unfilled remainder must not rest
-  limitBidIoc(100.0, 10);
+  EXPECT_EQ(bid(Orderbook::MAX_PRICE, 4), kFilled);
+  EXPECT_EQ(asksAt(Orderbook::MAX_PRICE), (LevelContents{{1, 6}}));
 
-  EXPECT_EQ(lastRes.status, ResponseStatus::PARTIAL_FILL);
-  ASSERT_EQ(ob.getTrades().size(), 1u);
-  EXPECT_EQ(getLastTrade().getQuantity(), 3u);
-
-  EXPECT_TRUE(ob.getBids().empty());
-  EXPECT_TRUE(ob.getAsks().empty());
-  EXPECT_TRUE(ob.getActiveOrders().empty());
+  EXPECT_EQ(bid(Orderbook::MAX_PRICE, 10), rested(2));
+  EXPECT_EQ(ob.bestBid(), Orderbook::MAX_PRICE);
+  EXPECT_EQ(ob.bestAsk(), std::nullopt);
 }
 
-TEST_F(OrderbookTest, CancelUnknownOrderIdReturnsBadRequest) {
-  Response::CancelOrder res{};
-  ob.cancelOrder(res, 999u);
-  EXPECT_EQ(res.status, ResponseStatus::BAD_REQUEST);
+TEST_F(OrderbookTest, PriceAboveMaxIsRejected) {
+  bid(100, 10);
+  ask(200, 10);
+  BookSnapshot before = snapshot(ob);
+
+  EXPECT_EQ(bid(Orderbook::MAX_PRICE + 1, 10), kRejected);
+  EXPECT_EQ(ask(Orderbook::MAX_PRICE + 1, 10), kRejected);
+
+  EXPECT_EQ(snapshot(ob), before);
+  EXPECT_EQ(ob.bestBid(), 100u);
+  EXPECT_EQ(ob.bestAsk(), 200u);
+  EXPECT_EQ(bid(101, 1), rested(3));  // rejected orders don't use up ids
 }
 
-TEST_F(OrderbookTest, CancelRemovesOrderAndEmptiesPriceLevel) {
-  limitBidGtc(100.0, 5);
-  OrderId lowerBid = lastRes.newOrderId;
-  limitBidGtc(101.0, 5);
-  OrderId topBid = lastRes.newOrderId;
+TEST_F(OrderbookTest, ZeroQuantityIsRejected) {
+  bid(100, 10);
+  ask(200, 10);
+  BookSnapshot before = snapshot(ob);
 
-  Response::CancelOrder res{};
-  ob.cancelOrder(res, topBid);
-  EXPECT_EQ(res.status, ResponseStatus::SUCCESS);
+  EXPECT_EQ(bid(150, 0), kRejected);
+  EXPECT_EQ(ask(150, 0), kRejected);
+  // would cross the book if it were accepted
+  EXPECT_EQ(bid(200, 0), kRejected);
 
-  // the 101 level is gone entirely, only the 100 level remains
-  ASSERT_EQ(ob.getBids().size(), 1u);
-  EXPECT_DOUBLE_EQ(getTopBid().getPrice(), 100.0);
-  EXPECT_EQ(getTopBid().getId(), lowerBid);
-  EXPECT_FALSE(ob.getActiveOrders().contains(topBid));
-
-  // cancelling the last order empties the book
-  ob.cancelOrder(res, lowerBid);
-  EXPECT_EQ(res.status, ResponseStatus::SUCCESS);
-  EXPECT_TRUE(ob.getBids().empty());
-  EXPECT_EQ(ob.getBids().size(), 0u);
-  EXPECT_TRUE(ob.getActiveOrders().empty());
+  EXPECT_EQ(snapshot(ob), before);
+  EXPECT_EQ(bid(101, 1), rested(3));
 }
 
-TEST_F(OrderbookTest, ModifyCannotIncreaseQuantity) {
-  limitBidGtc(100.0, 5);
-  OrderId id = lastRes.newOrderId;
+// SPEC §2.2: price 0 is used as "no price" by PriceBitset, so it must never rest
+TEST_F(OrderbookTest, ZeroPriceIsRejected) {
+  bid(100, 10);
+  ask(200, 10);
+  BookSnapshot before = snapshot(ob);
 
-  Response::ModifyOrder res{};
-  ob.modifyOrder(res, id, 10u);
+  EXPECT_EQ(bid(0, 10), kRejected);
+  EXPECT_EQ(ask(0, 10), kRejected);
 
-  EXPECT_EQ(res.status, ResponseStatus::BAD_REQUEST);
-  EXPECT_EQ(getTopBid().getQuantity(), 5u);
+  EXPECT_EQ(snapshot(ob), before);
+  EXPECT_EQ(ob.bestBid(), 100u);
+  EXPECT_EQ(ob.bestAsk(), 200u);
+  EXPECT_EQ(bid(101, 1), rested(3));
 }
 
-TEST_F(OrderbookTest, ModifyCannotSetNonPositiveQuantity) {
-  limitBidGtc(100.0, 5);
-  OrderId id = lastRes.newOrderId;
+// SPEC §2.2: a side that is neither Bid nor Ask is rejected
+TEST_F(OrderbookTest, InvalidSideIsRejected) {
+  bid(100, 10);
+  ask(200, 10);
+  BookSnapshot before = snapshot(ob);
 
-  Response::ModifyOrder res{};
-  ob.modifyOrder(res, id, 0u);
+  EXPECT_EQ(ob.addOrder(static_cast<Side>(2), 150, 10), kRejected);
 
-  EXPECT_EQ(res.status, ResponseStatus::BAD_REQUEST);
-  EXPECT_EQ(getTopBid().getQuantity(), 5u);
+  EXPECT_EQ(snapshot(ob), before);
+  EXPECT_EQ(bid(101, 1), rested(3));
 }
 
-TEST_F(OrderbookTest, ModifyCanReduceQuantity) {
-  limitBidGtc(100.0, 5);
-  OrderId id = lastRes.newOrderId;
+TEST_F(OrderbookTest, BestAskUpdatesAcrossBitsetWords) {
+  // 63 | 64 is a word boundary in PriceBitset
+  ask(65, 1);
+  ask(64, 1);
+  ask(63, 1);
+  EXPECT_EQ(ob.bestAsk(), 63u);
 
-  Response::ModifyOrder res{};
-  ob.modifyOrder(res, id, 2u);
-
-  EXPECT_EQ(res.status, ResponseStatus::SUCCESS);
-  ASSERT_EQ(ob.getBids().size(), 1u);
-  EXPECT_EQ(getTopBid().getQuantity(), 2u);
+  EXPECT_EQ(bid(200, 1), kFilled);
+  EXPECT_EQ(ob.bestAsk(), 64u);
+  EXPECT_EQ(bid(200, 1), kFilled);
+  EXPECT_EQ(ob.bestAsk(), 65u);
+  EXPECT_EQ(bid(200, 1), kFilled);
+  EXPECT_EQ(ob.bestAsk(), std::nullopt);
 }
 
-TEST_F(OrderbookTest, ModifyUnknownOrderIdReturnsBadRequest) {
-  Response::ModifyOrder res{};
-  ob.modifyOrder(res, 999u, 1u);
-  EXPECT_EQ(res.status, ResponseStatus::BAD_REQUEST);
+TEST_F(OrderbookTest, BestBidUpdatesAcrossBitsetWords) {
+  // 127 | 128 is a word boundary in PriceBitset
+  bid(127, 1);
+  bid(128, 1);
+  bid(63, 1);
+  EXPECT_EQ(ob.bestBid(), 128u);
+
+  EXPECT_EQ(ask(1, 1), kFilled);
+  EXPECT_EQ(ob.bestBid(), 127u);
+  EXPECT_EQ(ask(1, 1), kFilled);
+  EXPECT_EQ(ob.bestBid(), 63u);
+  EXPECT_EQ(ask(1, 1), kFilled);
+  EXPECT_EQ(ob.bestBid(), std::nullopt);
 }
 
-TEST_F(OrderbookTest, RejectsInvalidSide) {
-  Response::NewOrder res{};
-  ob.addOrder(res, static_cast<Side>(42), 100.0, 10, OrderType::LIMIT,
-              TimeInForce::GOOD_TILL_CANCEL);
+TEST_F(OrderbookTest, BestPriceJumpsToFarAwayLevel) {
+  bid(5, 1);
+  bid(90000, 1);
+  ask(90001, 1);
+  ask(99999, 1);
 
-  EXPECT_EQ(res.status, ResponseStatus::BAD_REQUEST);
-  EXPECT_TRUE(ob.getBids().empty());
-  EXPECT_TRUE(ob.getAsks().empty());
-  EXPECT_TRUE(ob.getActiveOrders().empty());
+  EXPECT_EQ(ask(90000, 1), kFilled);
+  EXPECT_EQ(ob.bestBid(), 5u);
+  EXPECT_EQ(bid(90001, 1), kFilled);
+  EXPECT_EQ(ob.bestAsk(), 99999u);
+
+  // the new best prices are used for matching, not just reported
+  EXPECT_EQ(ask(5, 1), kFilled);
+  EXPECT_EQ(bid(99999, 1), kFilled);
+  EXPECT_EQ(ob.bestBid(), std::nullopt);
+  EXPECT_EQ(ob.bestAsk(), std::nullopt);
 }
 
-TEST_F(OrderbookTest, RejectsNonPositivePrice) {
-  limitBidGtc(0.0, 10);
-  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
+TEST_F(OrderbookTest, LowestValidPriceWorksOnBothSides) {
+  EXPECT_EQ(bid(1, 5), rested(1));
+  EXPECT_EQ(bid(70, 5), rested(2));
+  EXPECT_EQ(ask(70, 5), kFilled);
+  EXPECT_EQ(ob.bestBid(), 1u);
 
-  limitBidGtc(-5.0, 10);
-  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
+  EXPECT_EQ(ask(1, 5), kFilled);
+  EXPECT_EQ(ob.bestBid(), std::nullopt);
 
-  EXPECT_TRUE(ob.getBids().empty());
-  EXPECT_TRUE(ob.getActiveOrders().empty());
+  EXPECT_EQ(ask(1, 5), rested(3));
+  EXPECT_EQ(ob.bestAsk(), 1u);
 }
 
-TEST_F(OrderbookTest, RejectsNonPositiveQuantity) {
-  limitBidGtc(100.0, 0);
+TEST_F(OrderbookTest, BookEmptiesThenRefills) {
+  bid(100, 10);
+  bid(99, 10);
+  ask(105, 10);
+  ask(106, 10);
 
-  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
-  EXPECT_TRUE(ob.getBids().empty());
-  EXPECT_TRUE(ob.getActiveOrders().empty());
+  EXPECT_EQ(ask(1, 20), kFilled);
+  EXPECT_EQ(bid(200, 20), kFilled);
+  EXPECT_EQ(ob.bestBid(), std::nullopt);
+  EXPECT_EQ(ob.bestAsk(), std::nullopt);
+  EXPECT_TRUE(snapshot(ob).empty());
+  for (Price p : {99u, 100u, 105u, 106u}) {
+    EXPECT_FALSE(ob.getBidsBitset().get(p));
+    EXPECT_FALSE(ob.getAsksBitset().get(p));
+  }
+
+  // new levels on the far side of where the old best prices were
+  EXPECT_EQ(bid(50, 3), rested(5));
+  EXPECT_EQ(ask(300, 4), rested(6));
+  EXPECT_EQ(ob.bestBid(), 50u);
+  EXPECT_EQ(ob.bestAsk(), 300u);
+
+  EXPECT_EQ(bid(40, 3), rested(7));
+  EXPECT_EQ(ask(400, 4), rested(8));
+  EXPECT_EQ(ob.bestBid(), 50u);
+  EXPECT_EQ(ob.bestAsk(), 300u);
+
+  EXPECT_EQ(ask(50, 3), kFilled);
+  EXPECT_EQ(ob.bestBid(), 40u);
+  EXPECT_EQ(bid(300, 4), kFilled);
+  EXPECT_EQ(ob.bestAsk(), 400u);
 }
 
-TEST_F(OrderbookTest, RejectsBadTimeInForceOnLimitOrder) {
-  ob.addOrder(lastRes, Side::BUY, 123.0, 123, OrderType::LIMIT,
-              TimeInForce::NONE);
-  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
-  ob.addOrder(lastRes, Side::BUY, 123.0, 123, OrderType::LIMIT,
-              static_cast<TimeInForce>(123));
-  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
+// ---------------------------------------------------------------------------
+// Cancel
+// ---------------------------------------------------------------------------
+
+TEST_F(OrderbookTest, BidCanBeCancelled) {
+  bid(100, 10);
+  ASSERT_NE(getOrderIter(1), std::nullopt);
+
+  EXPECT_EQ(ob.cancelOrder(1), Status::Success);
+  EXPECT_EQ(getOrderIter(1), std::nullopt);
+  EXPECT_EQ(numBidsAtLevel(100), 0u);
+  EXPECT_FALSE(ob.getBidsBitset().get(100));
+  EXPECT_EQ(ob.bestBid(), std::nullopt);
 }
 
-TEST_F(OrderbookTest, RejectsBadTimeInForceOnMarketOrder) {
-  ob.addOrder(lastRes, Side::BUY, 0, 123, OrderType::MARKET,
-              TimeInForce::GOOD_TILL_CANCEL);
-  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
-  ob.addOrder(lastRes, Side::BUY, 0, 123, OrderType::MARKET,
-              TimeInForce::FILL_OR_KILL);
-  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
-  ob.addOrder(lastRes, Side::BUY, 0, 123, OrderType::MARKET,
-              TimeInForce::IMMEDIATE_OR_CANCEL);
-  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
-  ob.addOrder(lastRes, Side::BUY, 0, 123, OrderType::MARKET,
-              static_cast<TimeInForce>(123));
-  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
+TEST_F(OrderbookTest, AskCanBeCancelled) {
+  ask(100, 10);
+  ASSERT_NE(getOrderIter(1), std::nullopt);
+
+  EXPECT_EQ(ob.cancelOrder(1), Status::Success);
+  EXPECT_EQ(getOrderIter(1), std::nullopt);
+  EXPECT_EQ(numAsksAtLevel(100), 0u);
+  EXPECT_FALSE(ob.getAsksBitset().get(100));
+  EXPECT_EQ(ob.bestAsk(), std::nullopt);
 }
 
-TEST_F(OrderbookTest, RejectsNonZeroPriceOnMarketOrder) {
-  ob.addOrder(lastRes, Side::BUY, 123, 123, OrderType::MARKET,
-              TimeInForce::NONE);
-  EXPECT_EQ(lastRes.status, ResponseStatus::BAD_REQUEST);
+TEST_F(OrderbookTest, CancelledOrderIsNotMatched) {
+  ask(100, 10);
+  ask(101, 10);
+  EXPECT_EQ(ob.cancelOrder(1), Status::Success);
+
+  EXPECT_EQ(bid(100, 10), rested(3));
+  EXPECT_EQ(asksAt(101), (LevelContents{{2, 10}}));
+}
+
+TEST_F(OrderbookTest, CancelBestBidLevelUpdatesBestBid) {
+  bid(100, 1);  // 1
+  bid(101, 1);  // 2
+  bid(102, 1);  // 3
+
+  EXPECT_EQ(ob.cancelOrder(3), Status::Success);
+  EXPECT_EQ(ob.bestBid(), 101u);
+  EXPECT_FALSE(ob.getBidsBitset().get(102));
+  EXPECT_EQ(bidsAt(101), (LevelContents{{2, 1}}));
+  EXPECT_EQ(bidsAt(100), (LevelContents{{1, 1}}));
+}
+
+TEST_F(OrderbookTest, CancelBestAskLevelUpdatesBestAsk) {
+  ask(100, 1);  // 1
+  ask(101, 1);  // 2
+  ask(102, 1);  // 3
+
+  EXPECT_EQ(ob.cancelOrder(1), Status::Success);
+  EXPECT_EQ(ob.bestAsk(), 101u);
+  EXPECT_FALSE(ob.getAsksBitset().get(100));
+}
+
+TEST_F(OrderbookTest, CancelBestAskAcrossBitsetWord) {
+  ask(127, 1);  // 1
+  ask(128, 1);  // 2
+  EXPECT_EQ(ob.cancelOrder(1), Status::Success);
+  EXPECT_EQ(ob.bestAsk(), 128u);
+  EXPECT_EQ(bid(127, 1), rested(3));
+  expectNotCrossed();
+}
+
+TEST_F(OrderbookTest, CancelBestBidAcrossBitsetWord) {
+  bid(63, 1);   // 1
+  bid(64, 1);   // 2
+  EXPECT_EQ(ob.cancelOrder(2), Status::Success);
+  EXPECT_EQ(ob.bestBid(), 63u);
+  EXPECT_EQ(ask(64, 1), rested(3));
+  expectNotCrossed();
+}
+
+TEST_F(OrderbookTest, CancelMiddleLevelKeepsBest) {
+  bid(100, 1);  // 1
+  bid(101, 1);  // 2
+  bid(102, 1);  // 3
+
+  EXPECT_EQ(ob.cancelOrder(2), Status::Success);
+  EXPECT_EQ(ob.bestBid(), 102u);
+  EXPECT_FALSE(ob.getBidsBitset().get(101));
+
+  // once the best level goes, the cancelled middle level must be skipped
+  EXPECT_EQ(ob.cancelOrder(3), Status::Success);
+  EXPECT_EQ(ob.bestBid(), 100u);
+}
+
+TEST_F(OrderbookTest, CancelMiddleOfQueueKeepsOthersInOrder) {
+  ask(100, 1);  // 1
+  ask(100, 2);  // 2
+  ask(100, 3);  // 3
+
+  EXPECT_EQ(ob.cancelOrder(2), Status::Success);
+  EXPECT_EQ(asksAt(100), (LevelContents{{1, 1}, {3, 3}}));
+  EXPECT_TRUE(ob.getAsksBitset().get(100));
+  EXPECT_EQ(ob.bestAsk(), 100u);
+
+  EXPECT_EQ(bid(100, 2), kFilled);
+  EXPECT_EQ(asksAt(100), (LevelContents{{3, 2}}));
+}
+
+TEST_F(OrderbookTest, CancelFrontOfQueueKeepsLevel) {
+  bid(100, 1);  // 1
+  bid(100, 2);  // 2
+
+  EXPECT_EQ(ob.cancelOrder(1), Status::Success);
+  EXPECT_EQ(bidsAt(100), (LevelContents{{2, 2}}));
+  EXPECT_TRUE(ob.getBidsBitset().get(100));
+  EXPECT_EQ(ob.bestBid(), 100u);
+}
+
+TEST_F(OrderbookTest, CancelPartiallyFilledOrder) {
+  ask(100, 10);
+  EXPECT_EQ(bid(100, 4), kFilled);
+  EXPECT_EQ(ob.cancelOrder(1), Status::Success);
+  EXPECT_EQ(ob.bestAsk(), std::nullopt);
+  EXPECT_TRUE(snapshot(ob).empty());
+}
+
+TEST_F(OrderbookTest, CannotCancelBadId) {
+  bid(100, 10);
+
+  EXPECT_EQ(ob.cancelOrder(2), Status::BadRequest);
+  expectResting(1, Side::Bid, 100, 10);
+}
+
+TEST_F(OrderbookTest, CancelTwiceFails) {
+  bid(100, 10);
+  bid(100, 5);
+  EXPECT_EQ(ob.cancelOrder(1), Status::Success);
+  EXPECT_EQ(ob.cancelOrder(1), Status::BadRequest);
+  EXPECT_EQ(bidsAt(100), (LevelContents{{2, 5}}));
+}
+
+TEST_F(OrderbookTest, CancelIdZeroFails) {
+  bid(100, 10);
+  EXPECT_EQ(ob.cancelOrder(0), Status::BadRequest);
+  expectResting(1, Side::Bid, 100, 10);
+}
+
+TEST_F(OrderbookTest, CancelIdPastEndOfMapFails) {
+  bid(100, 10);
+  BookSnapshot before = snapshot(ob);
+
+  EXPECT_EQ(ob.cancelOrder(ob.getIdMap().size()), Status::BadRequest);
+  EXPECT_EQ(ob.cancelOrder(1'000'000), Status::BadRequest);
+  EXPECT_EQ(ob.cancelOrder(UINT64_MAX), Status::BadRequest);
+  EXPECT_EQ(snapshot(ob), before);
+}
+
+TEST_F(OrderbookTest, CancelFullyFilledOrderFails) {
+  ask(100, 10);                 // 1
+  EXPECT_EQ(bid(100, 10), kFilled);
+  EXPECT_EQ(ob.cancelOrder(1), Status::BadRequest);
+  EXPECT_TRUE(snapshot(ob).empty());
+}
+
+// SPEC §2.4.1: id initialOrderMax and later must still map to the right order
+// after the id map grows past its initial size
+TEST_F(OrderbookTest, CancelWorksAfterIdMapGrows) {
+  // the fixture is Orderbook(10, 10); price 100 + id makes each order easy to find
+  for (OrderId id = 1; id <= 13; id++) {
+    ASSERT_EQ(bid(static_cast<Price>(100 + id), 1), rested(id));
+  }
+  for (OrderId id = 1; id <= 13; id++) {
+    expectResting(id, Side::Bid, static_cast<Price>(100 + id), 1);
+  }
+
+  for (OrderId id : {10u, 11u, 12u}) {
+    EXPECT_EQ(ob.cancelOrder(id), Status::Success) << "cancelling id " << id;
+    EXPECT_EQ(numBidsAtLevel(static_cast<Price>(100 + id)), 0u) << "cancelling id " << id;
+    expectNotResting(id);
+  }
+  // nothing else was removed
+  for (OrderId id : {1u, 2u, 9u, 13u}) {
+    expectResting(id, Side::Bid, static_cast<Price>(100 + id), 1);
+  }
+  EXPECT_EQ(ob.bestBid(), 113u);
+  EXPECT_EQ(ob.cancelOrder(13), Status::Success);
+  EXPECT_EQ(ob.bestBid(), 109u);
+}
+
+// ---------------------------------------------------------------------------
+// Modify
+// ---------------------------------------------------------------------------
+
+TEST_F(OrderbookTest, ModifyDecreaseKeepsQueuePosition) {
+  ask(100, 10);  // 1
+  ask(100, 10);  // 2
+
+  EXPECT_EQ(ob.modifyOrder(1, 4), Status::Success);
+  EXPECT_EQ(asksAt(100), (LevelContents{{1, 4}, {2, 10}}));
+  expectResting(1, Side::Ask, 100, 4);
+
+  // order 1 is still first in line
+  EXPECT_EQ(bid(100, 6), kFilled);
+  EXPECT_EQ(asksAt(100), (LevelContents{{2, 8}}));
+  expectNotResting(1);
+}
+
+TEST_F(OrderbookTest, ModifyDecreaseOnBid) {
+  bid(100, 10);  // 1
+  bid(101, 10);  // 2
+
+  EXPECT_EQ(ob.modifyOrder(2, 1), Status::Success);
+  EXPECT_EQ(ob.bestBid(), 101u);
+  EXPECT_EQ(ask(100, 5), kFilled);
+  EXPECT_EQ(bidsAt(101), (LevelContents{}));
+  EXPECT_EQ(bidsAt(100), (LevelContents{{1, 6}}));
+}
+
+// SPEC §2.3: equal quantity is a no-op that succeeds
+TEST_F(OrderbookTest, ModifyEqualQuantitySucceedsWithoutChange) {
+  ask(100, 10);
+  ask(100, 10);
+  BookSnapshot before = snapshot(ob);
+
+  EXPECT_EQ(ob.modifyOrder(1, 10), Status::Success);
+  EXPECT_EQ(snapshot(ob), before);
+}
+
+TEST_F(OrderbookTest, ModifyIncreaseFails) {
+  ask(100, 10);
+  BookSnapshot before = snapshot(ob);
+
+  EXPECT_EQ(ob.modifyOrder(1, 11), Status::BadRequest);
+  EXPECT_EQ(snapshot(ob), before);
+}
+
+TEST_F(OrderbookTest, ModifyToZeroFails) {
+  ask(100, 10);
+  BookSnapshot before = snapshot(ob);
+
+  EXPECT_EQ(ob.modifyOrder(1, 0), Status::BadRequest);
+  EXPECT_EQ(snapshot(ob), before);
+}
+
+TEST_F(OrderbookTest, ModifyComparesAgainstRemainingQuantity) {
+  ask(100, 10);                      // 1
+  EXPECT_EQ(bid(100, 4), kFilled);   // 6 left
+
+  EXPECT_EQ(ob.modifyOrder(1, 8), Status::BadRequest);
+  EXPECT_EQ(ob.modifyOrder(1, 7), Status::BadRequest);
+  expectResting(1, Side::Ask, 100, 6);
+
+  EXPECT_EQ(ob.modifyOrder(1, 5), Status::Success);
+  expectResting(1, Side::Ask, 100, 5);
+}
+
+TEST_F(OrderbookTest, ModifyRemainingQuantityExactlySucceeds) {
+  ask(100, 10);
+  EXPECT_EQ(bid(100, 4), kFilled);
+  EXPECT_EQ(ob.modifyOrder(1, 6), Status::Success);
+  expectResting(1, Side::Ask, 100, 6);
+}
+
+TEST_F(OrderbookTest, ModifyUnknownIdFails) {
+  ask(100, 10);
+  BookSnapshot before = snapshot(ob);
+
+  EXPECT_EQ(ob.modifyOrder(0, 5), Status::BadRequest);
+  EXPECT_EQ(ob.modifyOrder(2, 5), Status::BadRequest);
+  EXPECT_EQ(ob.modifyOrder(ob.getIdMap().size(), 5), Status::BadRequest);
+  EXPECT_EQ(ob.modifyOrder(UINT64_MAX, 5), Status::BadRequest);
+  EXPECT_EQ(snapshot(ob), before);
+}
+
+TEST_F(OrderbookTest, ModifyCancelledOrderFails) {
+  ask(100, 10);
+  EXPECT_EQ(ob.cancelOrder(1), Status::Success);
+  EXPECT_EQ(ob.modifyOrder(1, 5), Status::BadRequest);
+}
+
+TEST_F(OrderbookTest, ModifyFilledOrderFails) {
+  ask(100, 10);
+  EXPECT_EQ(bid(100, 10), kFilled);
+  EXPECT_EQ(ob.modifyOrder(1, 5), Status::BadRequest);
+}
+
+TEST_F(OrderbookTest, ModifyWorksAfterIdMapGrows) {
+  for (OrderId id = 1; id <= 12; id++) {
+    ASSERT_EQ(ask(static_cast<Price>(100 + id), 10), rested(id));
+  }
+  for (OrderId id : {10u, 11u, 12u}) {
+    EXPECT_EQ(ob.modifyOrder(id, id - 5), Status::Success) << "modifying id " << id;
+    expectResting(id, Side::Ask, static_cast<Price>(100 + id), id - 5);
+  }
+  expectResting(9, Side::Ask, 109, 10);
+}
+
+// ---------------------------------------------------------------------------
+// Memory pool
+// ---------------------------------------------------------------------------
+
+// with more resting orders than pool blocks, the allocator falls back to the heap
+TEST(OrderbookPoolTest, MoreOrdersThanBlocks) {
+  Orderbook book(4, 4);
+
+  for (OrderId id = 1; id <= 20; id++) {
+    // half share one level, half are on their own levels
+    Price price = id % 2 == 0 ? 500 : static_cast<Price>(100 + id);
+    ASSERT_EQ(book.addOrder(Side::Bid, price, id), (std::pair<OrderId, Status>{id, Status::Success}));
+  }
+  ASSERT_EQ(book.getBids()[500].size(), 10u);
+  EXPECT_EQ(book.bestBid(), 500u);
+
+  for (OrderId id = 1; id <= 20; id++) {
+    EXPECT_EQ(book.cancelOrder(id), Status::Success) << "cancelling id " << id;
+  }
+  EXPECT_EQ(book.bestBid(), std::nullopt);
+  EXPECT_TRUE(snapshot(book).empty());
+}
+
+TEST(OrderbookPoolTest, BlocksAreReusedAfterFills) {
+  Orderbook book(4, 4);
+
+  // repeatedly fill the pool, then empty it by matching, mixing pool and heap nodes
+  OrderId nextId = 1;
+  for (int round = 0; round < 50; round++) {
+    for (int i = 0; i < 6; i++) {
+      ASSERT_EQ(book.addOrder(Side::Ask, static_cast<Price>(100 + i), 2),
+                (std::pair<OrderId, Status>{nextId, Status::Success}));
+      nextId++;
+    }
+    ASSERT_EQ(book.addOrder(Side::Bid, 200, 12), (std::pair<OrderId, Status>{0, Status::Success}));
+    ASSERT_EQ(book.bestAsk(), std::nullopt);
+  }
+  EXPECT_TRUE(snapshot(book).empty());
 }

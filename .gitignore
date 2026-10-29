@@ -3,3 +3,6 @@ orderbook
 build/
 .clang-format
 *.o
+perf.data
+perf.data.old
+SPEC.md

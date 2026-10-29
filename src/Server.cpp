@@ -1,16 +1,11 @@
-#include <GlobalConsts.h>
-#include <MessageType.h>
-#include <OrderType.h>
-#include <RequestTypes.h>
-#include <ResponseTypes.h>
+#include "Protocol.h"
+#include <Request.h>
+#include <Response.h>
 #include <Server.h>
 #include <ServerEngineContext.h>
-#include <Side.h>
-#include <TimeInForce.h>
 #include <Utils.h>
 #include <array>
 #include <asm-generic/socket.h>
-#include <bit>
 #include <cassert>
 #include <cerrno>
 #include <cstdint>
@@ -26,9 +21,6 @@
 #include <sys/socket.h>
 #include <system_error>
 #include <unistd.h>
-#include <variant>
-
-// Server::Server(uint16_t port) { initFds(port); }
 
 Server::Server(ServerEngineContext &ctx, uint16_t port) : m_ctx(ctx) {
   // initialize epoll fd
@@ -137,36 +129,30 @@ void Server::writeSafely(int fd, const void *buf, size_t n) {
 
 // return false means error occurred or bad request
 bool Server::handleNewOrder(int currFd) {
-  // 1 byte Side, 1 byte OrderType, 1 byte TimeInForce, 8 byte Price,
+  // 1 byte Side, 8 byte Price,
   // 8 byte Quantity
   Side side;
-  OrderType orderType;
-  TimeInForce timeInForce;
-  uint64_t priceRaw;
-  uint64_t quantityRaw;
+  Price priceRaw;
+  Quantity quantityRaw;
 
-  std::array<uint8_t, GlobalLengths::NEW_ORDER_MESSAGE> buf;
+  std::array<uint8_t, Protocol::NEW_ORDER_SIZE> buf;
   int bytesRead = read(currFd, buf.data(), buf.size());
   if (bytesRead == 0) {
     markSessionClosed(currFd);
-    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &BAD_REQUEST, 1);
     return false;
   } else if (bytesRead != static_cast<int>(buf.size())) {
-    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &BAD_REQUEST, 1);
     return false;
   }
   side = static_cast<Side>(buf[0]);
-  orderType = static_cast<OrderType>(buf[1]);
-  timeInForce = static_cast<TimeInForce>(buf[2]);
-  std::memcpy(&priceRaw, &buf[3], sizeof(Price));
-  std::memcpy(&quantityRaw, &buf[11], sizeof(Quantity));
+  std::memcpy(&priceRaw, &buf[sizeof(Side)], sizeof(Price));
+  std::memcpy(&quantityRaw, &buf[sizeof(Side) + sizeof(Price)], sizeof(Quantity));
 
-  priceRaw = be64toh(priceRaw);
-  Price price = std::bit_cast<Price>(priceRaw);
+  Price price = be32toh(priceRaw);
   Quantity quantity = be64toh(quantityRaw);
 
-  Request::NewOrder newOrderReq{currFd,      side,  orderType,
-                                timeInForce, price, quantity};
+  Request newOrderReq{currFd, side, price, quantity};
   m_sessions.at(currFd).addActiveRequest();
 
   // push the request onto the spsc queue
@@ -182,15 +168,15 @@ bool Server::handleCancelOrder(int currFd) {
   int bytesRead = read(currFd, &orderId, sizeof(OrderId));
   if (bytesRead == 0) {
     markSessionClosed(currFd);
-    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &BAD_REQUEST, 1);
     return false;
   } else if (bytesRead != sizeof(OrderId)) {
-    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &BAD_REQUEST, 1);
     return false;
   }
   orderId = be64toh(orderId);
 
-  Request::CancelOrder cancelOrderReq{currFd, orderId};
+  Request cancelOrderReq{currFd, orderId};
   m_sessions.at(currFd).addActiveRequest();
 
   // push the request onto the spsc queue
@@ -203,24 +189,24 @@ bool Server::handleCancelOrder(int currFd) {
 bool Server::handleModifyOrder(int currFd) {
   OrderId orderId;
   Quantity newQuantity;
-  std::array<uint8_t, GlobalLengths::MODIFY_ORDER_MESSAGE> buf;
+  std::array<uint8_t, Protocol::MODIFY_ORDER_SIZE> buf;
   int bytesRead = read(currFd, buf.data(), buf.size());
   if (bytesRead == 0) {
     markSessionClosed(currFd);
-    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &BAD_REQUEST, 1);
     return false;
   } else if (bytesRead != static_cast<int>(buf.size())) {
-    writeSafely(currFd, &ResponseStatus::BAD_REQUEST, 1);
+    writeSafely(currFd, &BAD_REQUEST, 1);
     return false;
   }
 
   std::memcpy(&orderId, &buf[0], sizeof(OrderId));
-  std::memcpy(&newQuantity, &buf[8], sizeof(Quantity));
+  std::memcpy(&newQuantity, &buf[sizeof(OrderId)], sizeof(Quantity));
 
   orderId = be64toh(orderId);
   newQuantity = be64toh(newQuantity);
 
-  Request::ModifyOrder modifyOrderReq{currFd, orderId, newQuantity};
+  Request modifyOrderReq{currFd, orderId, newQuantity};
   m_sessions.at(currFd).addActiveRequest();
 
   // push the request onto the spsc queue
@@ -230,28 +216,31 @@ bool Server::handleModifyOrder(int currFd) {
   return true;
 }
 
-void Server::sendResponse(const ServerResponse &resVariant) {
-  int sessionId =
-      std::visit([](const auto &res) { return res.sessionId; }, resVariant);
+void Server::sendResponse(const Response &response) {
+  int sessionId = response.sessionId;
   if (!m_sessions.contains(sessionId)) {
     return;
   }
   Session &session = m_sessions.at(sessionId);
+  if (response.type == Protocol::MessageType::NewOrder){ // new
+    std::array<uint8_t, Protocol::NEW_ORDER_RES_SIZE> buf;
+    buf[0] = static_cast<uint8_t>(response.status);
+    OrderId netNewOrderId = htobe64(response.orderId);
+    std::memcpy(&buf[1], &netNewOrderId, sizeof(OrderId));
+    writeSafely(response.sessionId, buf.data(), buf.size());
+  }
+  else if (response.type == Protocol::MessageType::CancelOrder) 
+  { // cancel
+    writeSafely(response.sessionId, &response.status, 1);
+  }
+  else if (response.type == Protocol::MessageType::ModifyOrder)
+  { // modify
+    writeSafely(response.sessionId, &response.status, 1);
+  }
+  else {
+    throw std::runtime_error("engine wrote a response with a non-valid response type to the queue");
+  }
 
-  std::visit(overload{[this](const Response::NewOrder &res) {
-                        std::array<uint8_t, 9> buf;
-                        buf[0] = res.status;
-                        OrderId netNewOrderId = htobe64(res.newOrderId);
-                        std::memcpy(&buf[1], &netNewOrderId, 8);
-                        writeSafely(res.sessionId, buf.data(), buf.size());
-                      },
-                      [this](const Response::CancelOrder &res) {
-                        writeSafely(res.sessionId, &res.status, 1);
-                      },
-                      [this](const Response::ModifyOrder &res) {
-                        writeSafely(res.sessionId, &res.status, 1);
-                      }},
-             resVariant);
   if (m_sessions.contains(sessionId)) {
     session.removeActiveRequest();
     // assert(session.getActiveRequests() >= 0);
@@ -284,8 +273,8 @@ void Server::run() {
           ::perror("eventfd read");
           throw std::runtime_error("Failed to read from event fd");
         }
-        std::optional<ServerResponse> res;
-        while ((res = m_ctx.outgoingResponses.pop()) != std::nullopt) {
+        std::optional<Response> res;
+        while ((res = m_ctx.outgoingResponses.pop()) != std::nullopt) { // while the queue is not empty
           sendResponse(*res);
         }
       } else {
@@ -310,23 +299,23 @@ void Server::run() {
             }
           }
 
-          MessageType messageType = static_cast<MessageType>(messageTypeRaw);
+          Protocol::MessageType messageType = static_cast<Protocol::MessageType>(messageTypeRaw);
 
-          if (messageType == MessageType::NEW_ORDER) {
+          if (messageType == Protocol::MessageType::NewOrder) {
             if (!handleNewOrder(currFd))
               break;
 
-          } else if (messageType == MessageType::CANCEL_ORDER) {
+          } else if (messageType == Protocol::MessageType::CancelOrder) {
             if (!handleCancelOrder(currFd))
               break;
 
-          } else if (messageType == MessageType::MODIFY_ORDER) {
+          } else if (messageType == Protocol::MessageType::ModifyOrder) {
             if (!handleModifyOrder(currFd))
               break;
 
           } else {
             // invalid message type (maybe supported in the future)
-            writeSafely(currFd, &ResponseStatus::INVALID_MESSAGE_TYPE, 1);
+            writeSafely(currFd, &BAD_REQUEST, 1);
             break;
           }
         }

@@ -1,5 +1,5 @@
 #pragma once
-#include "ResponseTypes.h"
+#include "Protocol.h"
 #include "ServerEngineContext.h"
 #include <Session.h>
 #include <cstdint>
@@ -12,6 +12,9 @@ private:
   ServerEngineContext &m_ctx;
   int m_socket = -1;
   int m_epollFd = -1;
+  static constexpr Protocol::Status SUCCESS = Protocol::Status::Success;
+  static constexpr Protocol::Status BAD_REQUEST = Protocol::Status::BadRequest;
+  static constexpr Protocol::Status SERVER_ERROR = Protocol::Status::ServerError;
 
   void addFdEpoll(int fd);
   void removeFdEpoll(int fd);
@@ -21,7 +24,7 @@ private:
   bool handleNewOrder(int currFd);
   bool handleCancelOrder(int currFd);
   bool handleModifyOrder(int currFd);
-  void sendResponse(const ServerResponse &res);
+  void sendResponse(const Response &res);
   void writeSafely(int fd, const void *buf, size_t n);
 
 public:
