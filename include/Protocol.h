@@ -26,4 +26,5 @@ constexpr uint8_t NEW_ORDER_RES_SIZE = sizeof(Status) + sizeof(OrderId);
 constexpr uint8_t CANCEL_ORDER_RES_SIZE = sizeof(Status);
 constexpr uint8_t MODIFY_ORDER_RES_SIZE = sizeof(Status);
 
+
 }

@@ -1,6 +1,6 @@
 #include "Protocol.h"
-#include <RequestTypes.h>
-#include <ResponseTypes.h>
+#include <Request.h>
+#include <Response.h>
 #include <Server.h>
 #include <ServerEngineContext.h>
 #include <Utils.h>
@@ -21,7 +21,6 @@
 #include <sys/socket.h>
 #include <system_error>
 #include <unistd.h>
-#include <variant>
 
 Server::Server(ServerEngineContext &ctx, uint16_t port) : m_ctx(ctx) {
   // initialize epoll fd
@@ -153,8 +152,7 @@ bool Server::handleNewOrder(int currFd) {
   Price price = be64toh(priceRaw);
   Quantity quantity = be64toh(quantityRaw);
 
-  Request::NewOrder newOrderReq{currFd,      side,
-                                price, quantity};
+  Request newOrderReq{currFd, side, price, quantity};
   m_sessions.at(currFd).addActiveRequest();
 
   // push the request onto the spsc queue
@@ -178,7 +176,7 @@ bool Server::handleCancelOrder(int currFd) {
   }
   orderId = be64toh(orderId);
 
-  Request::CancelOrder cancelOrderReq{currFd, orderId};
+  Request cancelOrderReq{currFd, orderId};
   m_sessions.at(currFd).addActiveRequest();
 
   // push the request onto the spsc queue
@@ -208,7 +206,7 @@ bool Server::handleModifyOrder(int currFd) {
   orderId = be64toh(orderId);
   newQuantity = be64toh(newQuantity);
 
-  Request::ModifyOrder modifyOrderReq{currFd, orderId, newQuantity};
+  Request modifyOrderReq{currFd, orderId, newQuantity};
   m_sessions.at(currFd).addActiveRequest();
 
   // push the request onto the spsc queue
@@ -218,28 +216,31 @@ bool Server::handleModifyOrder(int currFd) {
   return true;
 }
 
-void Server::sendResponse(const ServerResponse &resVariant) {
-  int sessionId =
-      std::visit([](const auto &res) { return res.sessionId; }, resVariant);
+void Server::sendResponse(const Response &response) {
+  int sessionId = response.sessionId;
   if (!m_sessions.contains(sessionId)) {
     return;
   }
   Session &session = m_sessions.at(sessionId);
+  if (response.type == Protocol::MessageType::NewOrder){ // new
+    std::array<uint8_t, Protocol::NEW_ORDER_RES_SIZE> buf;
+    buf[0] = static_cast<uint8_t>(response.status);
+    OrderId netNewOrderId = htobe64(response.orderId);
+    std::memcpy(&buf[1], &netNewOrderId, sizeof(OrderId));
+    writeSafely(response.sessionId, buf.data(), buf.size());
+  }
+  else if (response.type == Protocol::MessageType::CancelOrder) 
+  { // cancel
+    writeSafely(response.sessionId, &response.status, 1);
+  }
+  else if (response.type == Protocol::MessageType::ModifyOrder)
+  { // modify
+    writeSafely(response.sessionId, &response.status, 1);
+  }
+  else {
+    throw std::runtime_error("engine wrote a response with a non-valid response type to the queue");
+  }
 
-  std::visit(overload{[this](const Response::NewOrder &res) {
-                        std::array<uint8_t, Protocol::NEW_ORDER_RES_SIZE> buf;
-                        buf[0] = static_cast<uint8_t>(res.status);
-                        OrderId netNewOrderId = htobe64(res.orderId);
-                        std::memcpy(&buf[1], &netNewOrderId, 8);
-                        writeSafely(res.sessionId, buf.data(), buf.size());
-                      },
-                      [this](const Response::CancelOrder &res) {
-                        writeSafely(res.sessionId, &res.status, 1);
-                      },
-                      [this](const Response::ModifyOrder &res) {
-                        writeSafely(res.sessionId, &res.status, 1);
-                      }},
-             resVariant);
   if (m_sessions.contains(sessionId)) {
     session.removeActiveRequest();
     // assert(session.getActiveRequests() >= 0);
@@ -272,8 +273,8 @@ void Server::run() {
           ::perror("eventfd read");
           throw std::runtime_error("Failed to read from event fd");
         }
-        std::optional<ServerResponse> res;
-        while ((res = m_ctx.outgoingResponses.pop()) != std::nullopt) {
+        std::optional<Response> res;
+        while ((res = m_ctx.outgoingResponses.pop()) != std::nullopt) { // while the queue is not empty
           sendResponse(*res);
         }
       } else {

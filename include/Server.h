@@ -1,6 +1,5 @@
 #pragma once
 #include "Protocol.h"
-#include "ResponseTypes.h"
 #include "ServerEngineContext.h"
 #include <Session.h>
 #include <cstdint>
@@ -25,7 +24,7 @@ private:
   bool handleNewOrder(int currFd);
   bool handleCancelOrder(int currFd);
   bool handleModifyOrder(int currFd);
-  void sendResponse(const ServerResponse &res);
+  void sendResponse(const Response &res);
   void writeSafely(int fd, const void *buf, size_t n);
 
 public:
