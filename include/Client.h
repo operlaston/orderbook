@@ -10,12 +10,12 @@
 #include <unistd.h>
 #include <Protocol.h>
 
-class OrderbookClient {
+class Client {
 private:
   int m_socket;
 
 public:
-  explicit OrderbookClient(uint16_t port) {
+  explicit Client(uint16_t port) {
     struct sockaddr_in serv_addr;
 
     if ((m_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -41,12 +41,12 @@ public:
   }
 
   // delete copy and move semantics
-  OrderbookClient(const OrderbookClient &other) = delete;
-  OrderbookClient &operator=(const OrderbookClient &other) = delete;
-  OrderbookClient(OrderbookClient &&other) = delete;
-  OrderbookClient &operator=(OrderbookClient &&other) = delete;
+  Client(const Client &other) = delete;
+  Client &operator=(const Client &other) = delete;
+  Client(Client &&other) = delete;
+  Client &operator=(Client &&other) = delete;
 
-  ~OrderbookClient() {
+  ~Client() {
     if (m_socket != -1) {
       close(m_socket);
       m_socket = -1;

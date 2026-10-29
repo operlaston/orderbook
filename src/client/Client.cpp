@@ -1,4 +1,4 @@
-#include <OrderbookClient.h>
+#include <Client.h>
 #include <Utils.h>
 #include <arpa/inet.h>
 #include <cstring>
@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 int main() {
-  OrderbookClient client{8080};
+  Client client{8080};
 
   while (true) {
     std::string actionsText = "\n=======Actions=======\n"
@@ -19,7 +19,7 @@ int main() {
 
     std::cout << actionsText << std::endl;
 
-    int actionOption = OrderbookClient::parseOption(1, 3);
+    int actionOption = Client::parseOption(1, 3);
 
     if (actionOption == 1) { // New Order
       std::string sidePrompt = "\n=======Side=======\n"
@@ -37,7 +37,7 @@ int main() {
       std::string quantityPrompt = "\nQuantity: ";
 
       std::cout << sidePrompt << std::endl;
-      int sideRaw = OrderbookClient::parseOption(1, 2);
+      int sideRaw = Client::parseOption(1, 2);
       sideRaw--;
       Side side = static_cast<Side>(sideRaw);
 
