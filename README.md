@@ -4,9 +4,6 @@
 
 An orderbook built in C++ that matches limit orders using price-time priority. Orders can be placed, canceled, and reduced in quantity.
 
-[Update October 2026]
-I have since tried to make improvements to the engine to increase new order and cancel order throughput. These optimizations can be viewed in the branch called `flat-vector`. Note that these optimizations are engine only and do not connect to the TCP server. As of now, the engine in `main` can handle ~5 million new orders/second and ~4 million order cancellations/second while the engine in `flat-vector` can handle ~40 million new orders/second and ~25 million order cancellations/second on a Lenovo Legion 5 in WSL2. I have additionally benchmarked the engine in `flat-vector` on a Macbook with an M5 Pro which yields ~65 million new orders/second and ~150 million order cancellations/second.
-
 ## Engine
 The engine runs on its own dedicated thread and is responsible for matching orders and keeping track of bids and asks. It spins in a busy loop (and should be pinned to a single core while doing so) waiting for requests to be made available to it through a single producer single consumer lock-free queue. Upon popping a request off the queue, it processes the request and sends a response back through a different spsc queue.
 
